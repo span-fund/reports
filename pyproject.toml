@@ -1,0 +1,28 @@
+[project]
+name = "span-dd-pipeline"
+version = "0.1.0"
+description = "Span Fund DD research pipeline"
+authors = [
+    { name = "Tomasz Kowalczyk", email = "tomek@kownet.info" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.6",
+    "ty>=0.0.1a1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["pipeline"]
+python_files = ["*_test.py"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
