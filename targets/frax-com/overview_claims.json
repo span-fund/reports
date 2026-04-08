@@ -1,0 +1,77 @@
+{
+  "claims": [
+    {
+      "name": "frxusd_supply",
+      "kind": "hard",
+      "display_label": "frxUSD total supply",
+      "parallel_field": "frxusd_supply",
+      "onchain": {
+        "fetcher": "total_supply",
+        "contract": "0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
+        "decimals": 18
+      }
+    },
+    {
+      "name": "sfrxusd_supply",
+      "kind": "hard",
+      "display_label": "sfrxUSD total supply",
+      "parallel_field": "sfrxusd_supply",
+      "onchain": {
+        "fetcher": "total_supply",
+        "contract": "0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6",
+        "decimals": 18
+      }
+    },
+    {
+      "name": "sfrxusd_total_assets",
+      "kind": "hard",
+      "display_label": "sfrxUSD totalAssets (ERC-4626)",
+      "parallel_field": "sfrxusd_total_assets",
+      "onchain": {
+        "fetcher": "contract_read",
+        "contract": "0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6",
+        "selector": "0x01e1d114",
+        "decimals": 18
+      }
+    },
+    {
+      "name": "fxs_supply",
+      "kind": "hard",
+      "display_label": "FXS (Frax Share) total supply",
+      "parallel_field": "fxs_supply",
+      "onchain": {
+        "fetcher": "total_supply",
+        "contract": "0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0",
+        "decimals": 18
+      }
+    },
+    {
+      "name": "tvl_usd",
+      "kind": "hard",
+      "display_label": "TVL (USD)",
+      "parallel_field": "tvl_usd",
+      "onchain": null
+    },
+    {
+      "name": "annual_revenue_usd",
+      "kind": "hard",
+      "display_label": "Annualized revenue (USD)",
+      "parallel_field": "annual_revenue_usd",
+      "onchain": null
+    },
+    {
+      "name": "top_holders",
+      "kind": "hard",
+      "display_label": "Top frxUSD holders",
+      "parallel_field": "top_holders",
+      "onchain": null
+    },
+    {
+      "name": "mechanism_summary",
+      "kind": "soft",
+      "display_label": "Mechanism one-liner",
+      "parallel_field": "mechanism_summary",
+      "onchain": null
+    }
+  ]
+}

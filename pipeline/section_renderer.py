@@ -1,28 +1,51 @@
 """Section renderers: take a section JSON (claims + verdicts + findings) and
-produce markdown. One renderer per section; Overview is the MVP tracer.
+produce markdown. Overview matches sky-protocol/README.md layout: a metrics
+table with one row per cross-checked claim, plus a `## Pytania do founders`
+section aggregating any ❌ claims so the report still renders when a verifier
+is broken.
 """
 
 from typing import Any
 
 
 def render_overview(section: dict[str, Any]) -> str:
-    lines: list[str] = [f"# Overview — {section['target_name']}", ""]
+    target = section["target_name"]
+    passed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     for claim in section["claims"]:
-        verdict = claim["verdict"]
-        marker = " [MANUAL REVIEW NEEDED]" if verdict.requires_manual_review else ""
-        lines.append(f"## {claim['name']} {verdict.tag}{marker}")
+        if claim["verdict"].tag == "❌":
+            failed.append(claim)
+        else:
+            passed.append(claim)
+
+    lines: list[str] = [f"# Overview — {target}", ""]
+
+    if passed:
+        lines.append("| Metric | Value | Source |")
+        lines.append("|---|---|---|")
+        for claim in passed:
+            lines.append(_render_metric_row(claim))
         lines.append("")
-        # One canonical value (findings agree when verdict is ✅; otherwise still
-        # show whatever each source reported so the conflict is auditable).
-        first_value = claim["findings"][0].value
-        lines.append(f"- **Value**: {first_value}")
-        lines.append(f"- **Verdict rationale**: {verdict.rationale}")
+
+    if failed:
+        lines.append("## Pytania do founders")
         lines.append("")
-        lines.append("### Sources")
-        for f in claim["findings"]:
-            lines.append(
-                f"- [{f.source} ({f.source_kind})]({f.evidence_url}) — "
-                f"{f.value} ({f.evidence_date})"
-            )
+        for claim in failed:
+            label = claim.get("display_label") or claim["name"]
+            rationale = claim["verdict"].rationale
+            lines.append(f"- **{label}** {claim['verdict'].tag} — {rationale}")
         lines.append("")
+
     return "\n".join(lines)
+
+
+def _render_metric_row(claim: dict[str, Any]) -> str:
+    label = claim.get("display_label") or claim["name"]
+    verdict = claim["verdict"]
+    marker = " [MANUAL REVIEW NEEDED]" if verdict.requires_manual_review else ""
+    value = claim["findings"][0].value
+    sources = ", ".join(
+        f"[{f.source}]({f.evidence_url}) {f.evidence_date}" for f in claim["findings"]
+    )
+    metric_cell = f"{label} {verdict.tag}{marker}".strip()
+    return f"| {metric_cell} | {value} | {sources} |"

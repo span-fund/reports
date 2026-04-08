@@ -1,8 +1,12 @@
 """DD-research skill orchestrator — the thin glue layer for `dd-research new`.
 
-Composes wizard config + env check + cost guard + Parallel wrapper + Etherscan
-wrapper + verdict engine + section renderer + audit log + last_run.json. All
-system-boundary collaborators (Parallel client, HTTP fetcher, env dict,
+Phase 3: Overview runs off a declarative claim manifest (one JSON per target).
+Composition:
+    wizard config → env check → cost guard → manifest loader →
+    Parallel wide fetch → per-claim on-chain fetch → verdict engine →
+    section renderer → audit log → last_run.json.
+
+All system-boundary collaborators (Parallel client, HTTP fetcher, env dict,
 filesystem root) are injected so the orchestrator itself stays pure enough to
 test end-to-end with no real network.
 """
@@ -14,13 +18,13 @@ from typing import Any
 
 from pipeline.audit_log import append_parallel_run
 from pipeline.cache import Cache
-from pipeline.claim_classifier import classify
 from pipeline.cost_guard import check_cost
 from pipeline.env_check import require_env_vars
-from pipeline.etherscan import fetch_total_supply
-from pipeline.parallel import ParallelClient, fetch_overview_total_supply
+from pipeline.etherscan import fetch_contract_read, fetch_token_balance, fetch_total_supply
+from pipeline.overview_claims import OnchainSpec, OverviewClaim, load_overview_claims
+from pipeline.parallel import ParallelClient, fetch_overview_claims
 from pipeline.section_renderer import render_overview
-from pipeline.verdict_engine import Finding, decide
+from pipeline.verdict_engine import Finding, Verdict, decide
 from pipeline.wizard import TargetConfig
 
 REQUIRED_ENV = ["PARALLEL_API_KEY", "ETHERSCAN_API_KEY"]
@@ -43,14 +47,14 @@ class DDRunResult:
 def run_dd_new(
     *,
     config: TargetConfig,
-    token_address: str,
-    token_decimals: int,
+    overview_claims_path: Path,
     cost_preview_usd: float,
     targets_root: Path,
     env: Mapping[str, str],
     parallel_client: ParallelClient,
     http_get: Callable[[str, dict], dict],
     cache_root: Path | None = None,
+    chain_id: int = 1,
 ) -> DDRunResult:
     # 1. Fail-fast on missing env vars
     require_env_vars(env, REQUIRED_ENV)
@@ -58,93 +62,236 @@ def run_dd_new(
     # 2. Cost pre-flight — abort before first Parallel call if over soft cap
     check_cost(preview_usd=cost_preview_usd, soft_cap_usd=config.soft_cap_usd)
 
-    # 3. Target dir scaffold
+    # 3. Target dir scaffold + persist config
     target_dir = targets_root / config.slug
     target_dir.mkdir(parents=True, exist_ok=True)
-
-    # 4. Persist config
     (target_dir / "config.json").write_text(_json_dumps(asdict(config)))
 
-    # 5. Parallel (cache-aware) + Etherscan
+    # 4. Load the Overview claim manifest (data, not code)
+    claims = load_overview_claims(overview_claims_path)
+
+    # 5. Parallel wide fetch — one call for the whole section, cached 7d
     cache = Cache(root=cache_root or targets_root / "_cache", ttls=CACHE_TTLS)
-    parallel_cache_key = f"overview:totalSupply:{config.slug}:{config.tier}"
+    parallel_cache_key = _parallel_cache_key(config, claims)
     cached = cache.get(config.slug, "parallel", parallel_cache_key)
     if cached is not None:
-        parallel_finding = _finding_from_dict(cached)
+        parallel_findings = [_finding_from_dict(d) for d in cached]
     else:
-        parallel_finding, audit = fetch_overview_total_supply(
+        parallel_findings, audit = fetch_overview_claims(
             target_name=config.slug,
             target_domain=config.domain,
             tier=config.tier,
+            claims=claims,
             client=parallel_client,
         )
-        cache.set(config.slug, "parallel", parallel_cache_key, _finding_to_dict(parallel_finding))
+        cache.set(
+            config.slug,
+            "parallel",
+            parallel_cache_key,
+            [_finding_to_dict(f) for f in parallel_findings],
+        )
         append_parallel_run(target_dir / "parallel-runs.jsonl", audit)
 
-    onchain_finding = fetch_total_supply(
-        chain_id=1,  # ethereum mainnet for tracer
-        token_address=token_address,
-        decimals=token_decimals,
-        http_get=http_get,
-        api_key=env["ETHERSCAN_API_KEY"],
-    )
+    parallel_by_claim = {f.claim: f for f in parallel_findings}
 
-    # 6. Classify claim + verdict with Phase 2 hard/soft taxonomy
-    findings = [parallel_finding, onchain_finding]
-    kind = classify(section="Overview", claim_name="totalSupply")
-    verdict = decide(
-        claim="totalSupply",
-        findings=findings,
-        kind=kind,
-        confidence_threshold=config.confidence_threshold,
-    )
+    # 6. Per-claim on-chain fetch (cached 1h per contract+selector) with
+    #    graceful degradation: a failing fetcher drops its finding so the
+    #    verdict falls back to ❌ via STRICT policy, but the section still
+    #    renders.
+    rendered_claims: list[dict[str, Any]] = []
+    verdicts_out: dict[str, dict[str, str]] = {}
+    claims_out: dict[str, dict[str, Any]] = {}
+    manual_review: list[str] = []
+    warnings: list[str] = []
 
-    # 7. Render Overview section
-    section = {
-        "target_name": config.slug,
-        "claims": [
+    for claim in claims:
+        findings: list[Finding] = []
+        parallel_finding = parallel_by_claim.get(claim.name)
+        if parallel_finding is not None:
+            findings.append(parallel_finding)
+
+        if claim.onchain is not None:
+            onchain_finding = _fetch_onchain_cached(
+                cache=cache,
+                target_slug=config.slug,
+                claim=claim,
+                http_get=http_get,
+                api_key=env["ETHERSCAN_API_KEY"],
+                chain_id=chain_id,
+            )
+            if onchain_finding is not None:
+                findings.append(onchain_finding)
+
+        verdict = decide(
+            claim=claim.name,
+            findings=findings,
+            kind=claim.kind,
+            confidence_threshold=config.confidence_threshold,
+        )
+
+        rendered_claims.append(
             {
-                "name": "totalSupply",
-                "kind": kind,
+                "name": claim.name,
+                "display_label": claim.display_label,
+                "kind": claim.kind,
                 "verdict": verdict,
                 "findings": findings,
             }
-        ],
-    }
-    readme = render_overview(section)
-    (target_dir / "README.md").write_text(readme)
+        )
+        verdicts_out[claim.name] = {
+            "tag": verdict.tag,
+            "rationale": verdict.rationale,
+        }
+        claims_out[claim.name] = {
+            "kind": claim.kind,
+            "requires_manual_review": verdict.requires_manual_review,
+        }
+        if verdict.requires_manual_review:
+            manual_review.append(claim.name)
 
-    # 8. Collect manual-review list + warnings for the skill layer
-    manual_review_claims = ["totalSupply"] if verdict.requires_manual_review else []
-    warnings: list[str] = []
-    if kind == "hard":
-        parallel_confidence = parallel_finding.confidence
-        if parallel_confidence is not None and parallel_confidence < config.confidence_threshold:
-            warnings.append(
-                f"low Parallel confidence on hard claim totalSupply: "
-                f"{parallel_confidence:.2f} < threshold {config.confidence_threshold:.2f}"
-            )
+        _collect_warnings(warnings, claim, parallel_finding, verdict, config)
 
-    # 9. Persist last_run.json — the deterministic ground truth for refresh/section modes
+    # 7. Render Overview
+    section = {"target_name": config.slug, "claims": rendered_claims}
+    (target_dir / "README.md").write_text(render_overview(section))
+
+    # 8. Persist last_run.json — deterministic ground truth
     last_run: dict[str, Any] = {
         "config": asdict(config),
-        "findings": [_finding_to_dict(f) for f in findings],
-        "verdicts": {"totalSupply": {"tag": verdict.tag, "rationale": verdict.rationale}},
-        "claims": {
-            "totalSupply": {
-                "kind": kind,
-                "requires_manual_review": verdict.requires_manual_review,
-            }
-        },
+        "findings": [_finding_to_dict(f) for c in rendered_claims for f in c["findings"]],
+        "verdicts": verdicts_out,
+        "claims": claims_out,
     }
     (target_dir / "last_run.json").write_text(_json_dumps(last_run))
 
+    section_tag = _section_tag(rendered_claims)
     return DDRunResult(
         target_dir=target_dir,
-        verdict_tag=verdict.tag,
-        manual_review_claims=manual_review_claims,
+        verdict_tag=section_tag,
+        manual_review_claims=manual_review,
         warnings=warnings,
     )
+
+
+def _parallel_cache_key(config: TargetConfig, claims: list[OverviewClaim]) -> str:
+    fields = ",".join(sorted(c.parallel_field for c in claims))
+    return f"overview:{config.slug}:{config.tier}:{fields}"
+
+
+def _onchain_cache_key(claim: OverviewClaim) -> str:
+    spec = claim.onchain
+    assert spec is not None
+    return f"{spec.contract}:{spec.fetcher}:{spec.selector or ''}:{spec.holder or ''}"
+
+
+def _fetch_onchain_cached(
+    *,
+    cache: Cache,
+    target_slug: str,
+    claim: OverviewClaim,
+    http_get: Callable[[str, dict], dict],
+    api_key: str,
+    chain_id: int,
+) -> Finding | None:
+    key = _onchain_cache_key(claim)
+    cached = cache.get(target_slug, "onchain", key)
+    if cached is not None:
+        return _finding_from_dict(cached)
+    try:
+        finding = _dispatch_onchain(
+            claim=claim,
+            http_get=http_get,
+            api_key=api_key,
+            chain_id=chain_id,
+        )
+    except Exception:
+        return None
+    cache.set(target_slug, "onchain", key, _finding_to_dict(finding))
+    return finding
+
+
+def _dispatch_onchain(
+    *,
+    claim: OverviewClaim,
+    http_get: Callable[[str, dict], dict],
+    api_key: str,
+    chain_id: int,
+) -> Finding:
+    spec: OnchainSpec = claim.onchain  # type: ignore[assignment]
+    if spec.fetcher == "total_supply":
+        raw = fetch_total_supply(
+            chain_id=chain_id,
+            token_address=spec.contract,
+            decimals=spec.decimals,
+            http_get=http_get,
+            api_key=api_key,
+        )
+        # fetch_total_supply hard-codes the claim name to "totalSupply";
+        # rename it to match the manifest so verdict-engine sees a coherent
+        # set of findings for the same claim.
+        return Finding(
+            claim=claim.name,
+            value=raw.value,
+            source=raw.source,
+            source_kind=raw.source_kind,
+            evidence_url=raw.evidence_url,
+            evidence_date=raw.evidence_date,
+            confidence=raw.confidence,
+        )
+    if spec.fetcher == "contract_read":
+        if spec.selector is None:
+            raise ValueError(f"contract_read on {claim.name} requires selector")
+        return fetch_contract_read(
+            chain_id=chain_id,
+            contract=spec.contract,
+            selector=spec.selector,
+            decimals=spec.decimals,
+            claim_name=claim.name,
+            http_get=http_get,
+            api_key=api_key,
+        )
+    if spec.fetcher == "token_balance":
+        if spec.holder is None:
+            raise ValueError(f"token_balance on {claim.name} requires holder")
+        return fetch_token_balance(
+            chain_id=chain_id,
+            holder_address=spec.holder,
+            token_address=spec.contract,
+            decimals=spec.decimals,
+            claim_name=claim.name,
+            http_get=http_get,
+            api_key=api_key,
+        )
+    raise ValueError(f"unknown onchain fetcher {spec.fetcher!r} for {claim.name}")
+
+
+def _collect_warnings(
+    warnings: list[str],
+    claim: OverviewClaim,
+    parallel_finding: Finding | None,
+    verdict: Verdict,
+    config: TargetConfig,
+) -> None:
+    if claim.kind == "hard" and parallel_finding is not None:
+        pc = parallel_finding.confidence
+        if pc is not None and pc < config.confidence_threshold:
+            warnings.append(
+                f"low Parallel confidence on hard claim {claim.name}: "
+                f"{pc:.2f} < threshold {config.confidence_threshold:.2f}"
+            )
+    if verdict.tag == "❌":
+        warnings.append(f"claim {claim.name} failed STRICT cross-check: {verdict.rationale}")
+
+
+def _section_tag(rendered_claims: list[dict[str, Any]]) -> str:
+    """Coarse section-level tag for the skill return value: ❌ if any claim
+    failed, ⚠️ if any disagree, else ✅."""
+    tags = {c["verdict"].tag for c in rendered_claims}
+    if "❌" in tags:
+        return "❌"
+    if "⚠️" in tags:
+        return "⚠️"
+    return "✅"
 
 
 def _finding_to_dict(f: Any) -> dict[str, Any]:

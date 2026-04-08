@@ -59,14 +59,37 @@ user explicitly:
 
 If the user declines, exit cleanly without touching the filesystem.
 
-### 3. Ask for the primary token contract
+### 3. Resolve the Overview claim manifest
 
-The tracer bullet needs a primary ERC-20 to cross-check. Ask:
+Phase 3 runs the Overview section off a declarative JSON manifest, one per
+target, at `targets/<slug>/overview_claims.json`. Each entry binds a Parallel
+schema field to an optional on-chain fetcher spec (see
+`pipeline/overview_claims.py` for the dataclasses and
+`targets/frax-com/overview_claims.json` for a real example).
 
-- Token contract address (0x...)
-- Token decimals (usually 18)
+Resolution order:
 
-In later phases the skill will auto-resolve this from the target config.
+1. **Manifest already exists** at `targets/<slug>/overview_claims.json` — use
+   it as-is. Tell the user which file you found and show a one-line summary
+   (`N claims, M cross-checkable, K Parallel-only`).
+2. **No manifest** — ask the user how they want to bootstrap it:
+   - **(a) Hand-edit** — create `targets/<slug>/overview_claims.json` manually
+     following the shape in `targets/frax-com/overview_claims.json`, then
+     re-run the skill. Exit cleanly; do NOT auto-run with an empty Overview.
+   - **(b) Minimal tracer** — ask for a single primary-token address +
+     decimals and write a one-claim manifest (total_supply only). This
+     reproduces Phase 1/2 tracer behavior and is fine for a smoke test but
+     will NOT satisfy Phase 3 acceptance.
+
+In either branch, validate the manifest by loading it through
+`pipeline.overview_claims.load_overview_claims(path)` before calling
+`run_dd_new`. A JSON parse error or missing required field surfaces as a
+`KeyError` / `json.JSONDecodeError` — re-raise so the user can fix the file.
+
+Claim kinds come from the manifest, not from `claim_classifier`. Every
+numeric claim (supply, TVL, revenue, balances) should be `hard`; narrative
+claims (mechanism one-liner, ecosystem context) are `soft`. Hard claims
+always carry `[MANUAL REVIEW NEEDED]` regardless of cross-check outcome.
 
 ### 4. Run the pipeline
 
@@ -121,15 +144,36 @@ class ParallelAdapter:
         }
 
 
+targets_root = Path.cwd() / "targets"
+manifest_path = targets_root / config.slug / "overview_claims.json"
+if not manifest_path.exists():
+    raise FileNotFoundError(
+        f"No Overview manifest at {manifest_path}. "
+        "Create it by hand (see targets/frax-com/overview_claims.json) "
+        "or opt into the minimal tracer path from step 3."
+    )
+
 result = run_dd_new(
     config=config,
-    token_address=token_address,
-    token_decimals=token_decimals,
+    overview_claims_path=manifest_path,
     cost_preview_usd=cost_preview_usd,
-    targets_root=Path.cwd() / "targets",
+    targets_root=targets_root,
     env=os.environ,
     parallel_client=ParallelAdapter(),
     http_get=http_get,
+)
+```
+
+Note: the manifest must live inside the target directory because
+`run_dd_new` creates `targets/<slug>/` on first run. If you're bootstrapping
+a brand-new target, create the directory and write the manifest there
+*before* calling `run_dd_new`:
+
+```python
+targets_root.mkdir(parents=True, exist_ok=True)
+(targets_root / config.slug).mkdir(parents=True, exist_ok=True)
+(targets_root / config.slug / "overview_claims.json").write_text(
+    json.dumps({"claims": [...]}, indent=2)
 )
 ```
 
@@ -137,20 +181,27 @@ result = run_dd_new(
 
 After `run_dd_new` returns, tell the user:
 
-- Verdict tag for totalSupply (`result.verdict_tag`)
-- Target directory path (`result.target_dir`)
+- **Section verdict** (`result.verdict_tag`) — ✅ / ⚠️ / ❌ aggregate across
+  every claim in the Overview manifest. ❌ means at least one claim failed
+  STRICT cross-check (usually because its on-chain verifier was missing or
+  errored, or the claim is Parallel-only and STRICT requires ≥1 non-Parallel).
+- **Target directory** (`result.target_dir`) — where all artifacts landed.
 - **Manual review list** (`result.manual_review_claims`) — print every entry
-  as a bullet, grouped per section ("Overview — totalSupply [MANUAL REVIEW
-  NEEDED]"). These are hard claims (or soft claims with low Parallel
-  confidence) that the analyst must verify before trusting the DD.
+  as a bullet grouped per section (e.g. "Overview — frxusd_supply [MANUAL
+  REVIEW NEEDED]"). Expect every hard claim in here, even the ✅ ones —
+  Parallel confidence is never a shortcut for manual review on numeric
+  claims.
 - **Warnings** (`result.warnings`) — print each as a prominent warning line.
-  Typically low Parallel confidence on a hard claim.
-- Point them at `<target_dir>/README.md` for the rendered report (hard claims
-  are marked inline with `[MANUAL REVIEW NEEDED]`)
-- Remind them that this is a **draft** — hard claims (any numbers, ownership,
-  regulatory status) still need manual review before commit
+  Covers (a) low Parallel confidence on hard claims and (b) any claim that
+  failed STRICT cross-check. Claims that failed show up in the README's
+  `## Pytania do founders` section with the rationale from verdict-engine.
+- Point them at `<target_dir>/README.md` for the rendered report. Structure:
+  a `| Metric | Value | Source |` table (one row per ✅/⚠️ claim) plus a
+  `## Pytania do founders` section aggregating ❌ claims.
+- Remind them that this is a **draft** — every hard claim (all numbers,
+  ownership, regulatory status) still needs manual review before commit.
 - Remind them the skill did NOT commit anything — working tree is dirty for
-  their review
+  their review.
 
 ## Mode: `refresh` / `section` / `compare`
 
@@ -163,17 +214,29 @@ them at `plans/dd-research-implementation.md` for the roadmap.
 After `run_dd_new` succeeds, verify before handing off to the user:
 
 - [ ] `<slug>/config.json` exists and matches wizard answers
-- [ ] `<slug>/last_run.json` exists and has a `verdicts` entry for totalSupply
+- [ ] `<slug>/overview_claims.json` exists (was required for the run)
+- [ ] `<slug>/last_run.json` exists and has a `verdicts` entry for **every**
+      claim in the manifest
 - [ ] `<slug>/parallel-runs.jsonl` has at least one line (unless cache hit)
-- [ ] `<slug>/README.md` contains the verdict tag and both source citations
+- [ ] `<slug>/README.md` contains the `| Metric | Value | Source |` table
+      and at least one source citation per ✅/⚠️ claim
+- [ ] Every hard claim in the manifest appears in
+      `result.manual_review_claims` (hard claims never auto-pass)
 - [ ] Working tree is dirty (skill never commits)
-- [ ] No API keys appear in any of the written files (grep for `PARALLEL_API_KEY`, `ETHERSCAN_API_KEY`, and the actual key prefixes)
+- [ ] No API keys appear in any of the written files (grep for
+      `PARALLEL_API_KEY`, `ETHERSCAN_API_KEY`, and the actual key prefixes)
 
 ## When things go wrong
 
 - **`MissingEnvVars`** — tell the user exactly which vars are missing and point at `.env.example`
 - **`CostCapExceeded`** — tell the user the preview vs cap and suggest raising the cap or switching to a cheaper tier
 - **`WizardError`** — re-ask the specific question that failed with the validation message
+- **`FileNotFoundError` on `overview_claims.json`** — the target has no
+  manifest. Offer the user the two bootstrap paths from step 3 (hand-edit
+  vs. minimal tracer). Do NOT silently create an empty manifest.
+- **`KeyError` / `json.JSONDecodeError` while loading the manifest** —
+  re-raise with the offending path; the user needs to fix the JSON before
+  re-running (don't auto-repair)
 
 Never catch and swallow errors. Let them surface so the user can fix
 configuration before burning Parallel budget.
