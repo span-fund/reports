@@ -23,6 +23,9 @@ class TargetConfig:
     tier: str
     soft_cap_usd: float
     slug: str
+    # Minimum Parallel confidence required to auto-pass a soft claim with a
+    # clean STRICT ✅. Hard claims always go to manual review regardless.
+    confidence_threshold: float = 0.7
 
 
 def _slugify(domain: str) -> str:

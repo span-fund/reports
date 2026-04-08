@@ -48,3 +48,83 @@ def test_overview_renders_claim_with_verdict_tag_and_both_citations():
     assert "https://ethena.fi/docs" in md
     assert "https://etherscan.io/token/0xabc" in md
     assert "2026-04-08" in md
+
+
+def test_overview_marks_claims_needing_manual_review():
+    # A hard claim (or soft with low confidence) surfaces in markdown with a
+    # [MANUAL REVIEW NEEDED] marker so the analyst cannot miss it at review.
+    section = {
+        "target_name": "Ethena",
+        "claims": [
+            {
+                "name": "totalSupply",
+                "kind": "hard",
+                "verdict": Verdict(
+                    tag="✅",
+                    rationale="2 sources agree",
+                    requires_manual_review=True,
+                ),
+                "findings": [
+                    Finding(
+                        claim="totalSupply",
+                        value="1000000",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://ethena.fi/docs",
+                        evidence_date="2026-04-08",
+                    ),
+                    Finding(
+                        claim="totalSupply",
+                        value="1000000",
+                        source="etherscan",
+                        source_kind="onchain",
+                        evidence_url="https://etherscan.io/token/0xabc",
+                        evidence_date="2026-04-08",
+                    ),
+                ],
+            }
+        ],
+    }
+
+    md = render_overview(section)
+
+    assert "[MANUAL REVIEW NEEDED]" in md
+
+
+def test_overview_omits_marker_for_auto_passed_soft_claims():
+    section = {
+        "target_name": "Ethena",
+        "claims": [
+            {
+                "name": "mechanism_summary",
+                "kind": "soft",
+                "verdict": Verdict(
+                    tag="✅",
+                    rationale="2 sources agree",
+                    requires_manual_review=False,
+                ),
+                "findings": [
+                    Finding(
+                        claim="mechanism_summary",
+                        value="delta-neutral",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://ethena.fi/docs",
+                        evidence_date="2026-04-08",
+                    ),
+                    Finding(
+                        claim="mechanism_summary",
+                        value="delta-neutral",
+                        source="etherscan",
+                        source_kind="onchain",
+                        evidence_url="https://etherscan.io/token/0xabc",
+                        evidence_date="2026-04-08",
+                    ),
+                ],
+            }
+        ],
+    }
+
+    md = render_overview(section)
+
+    assert "[MANUAL REVIEW NEEDED]" not in md

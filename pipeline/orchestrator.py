@@ -14,6 +14,7 @@ from typing import Any
 
 from pipeline.audit_log import append_parallel_run
 from pipeline.cache import Cache
+from pipeline.claim_classifier import classify
 from pipeline.cost_guard import check_cost
 from pipeline.env_check import require_env_vars
 from pipeline.etherscan import fetch_total_supply
@@ -35,6 +36,8 @@ CACHE_TTLS = {
 class DDRunResult:
     target_dir: Path
     verdict_tag: str
+    manual_review_claims: list[str]
+    warnings: list[str]
 
 
 def run_dd_new(
@@ -86,9 +89,15 @@ def run_dd_new(
         api_key=env["ETHERSCAN_API_KEY"],
     )
 
-    # 6. Verdict
+    # 6. Classify claim + verdict with Phase 2 hard/soft taxonomy
     findings = [parallel_finding, onchain_finding]
-    verdict = decide(claim="totalSupply", findings=findings)
+    kind = classify(section="Overview", claim_name="totalSupply")
+    verdict = decide(
+        claim="totalSupply",
+        findings=findings,
+        kind=kind,
+        confidence_threshold=config.confidence_threshold,
+    )
 
     # 7. Render Overview section
     section = {
@@ -96,6 +105,7 @@ def run_dd_new(
         "claims": [
             {
                 "name": "totalSupply",
+                "kind": kind,
                 "verdict": verdict,
                 "findings": findings,
             }
@@ -104,18 +114,40 @@ def run_dd_new(
     readme = render_overview(section)
     (target_dir / "README.md").write_text(readme)
 
-    # 8. Persist last_run.json — the deterministic ground truth for refresh/section modes
+    # 8. Collect manual-review list + warnings for the skill layer
+    manual_review_claims = ["totalSupply"] if verdict.requires_manual_review else []
+    warnings: list[str] = []
+    if kind == "hard":
+        parallel_confidence = parallel_finding.confidence
+        if parallel_confidence is not None and parallel_confidence < config.confidence_threshold:
+            warnings.append(
+                f"low Parallel confidence on hard claim totalSupply: "
+                f"{parallel_confidence:.2f} < threshold {config.confidence_threshold:.2f}"
+            )
+
+    # 9. Persist last_run.json — the deterministic ground truth for refresh/section modes
     last_run: dict[str, Any] = {
         "config": asdict(config),
         "findings": [_finding_to_dict(f) for f in findings],
         "verdicts": {"totalSupply": {"tag": verdict.tag, "rationale": verdict.rationale}},
+        "claims": {
+            "totalSupply": {
+                "kind": kind,
+                "requires_manual_review": verdict.requires_manual_review,
+            }
+        },
     }
     (target_dir / "last_run.json").write_text(_json_dumps(last_run))
 
-    return DDRunResult(target_dir=target_dir, verdict_tag=verdict.tag)
+    return DDRunResult(
+        target_dir=target_dir,
+        verdict_tag=verdict.tag,
+        manual_review_claims=manual_review_claims,
+        warnings=warnings,
+    )
 
 
-def _finding_to_dict(f: Any) -> dict[str, str]:
+def _finding_to_dict(f: Any) -> dict[str, Any]:
     return {
         "claim": f.claim,
         "value": f.value,
@@ -123,10 +155,11 @@ def _finding_to_dict(f: Any) -> dict[str, str]:
         "source_kind": f.source_kind,
         "evidence_url": f.evidence_url,
         "evidence_date": f.evidence_date,
+        "confidence": f.confidence,
     }
 
 
-def _finding_from_dict(d: dict[str, str]) -> Finding:
+def _finding_from_dict(d: dict[str, Any]) -> Finding:
     return Finding(
         claim=d["claim"],
         value=d["value"],
@@ -134,6 +167,7 @@ def _finding_from_dict(d: dict[str, str]) -> Finding:
         source_kind=d["source_kind"],
         evidence_url=d["evidence_url"],
         evidence_date=d["evidence_date"],
+        confidence=d.get("confidence"),
     )
 
 

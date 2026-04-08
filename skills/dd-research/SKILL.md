@@ -139,7 +139,14 @@ After `run_dd_new` returns, tell the user:
 
 - Verdict tag for totalSupply (`result.verdict_tag`)
 - Target directory path (`result.target_dir`)
-- Point them at `<target_dir>/README.md` for the rendered report
+- **Manual review list** (`result.manual_review_claims`) — print every entry
+  as a bullet, grouped per section ("Overview — totalSupply [MANUAL REVIEW
+  NEEDED]"). These are hard claims (or soft claims with low Parallel
+  confidence) that the analyst must verify before trusting the DD.
+- **Warnings** (`result.warnings`) — print each as a prominent warning line.
+  Typically low Parallel confidence on a hard claim.
+- Point them at `<target_dir>/README.md` for the rendered report (hard claims
+  are marked inline with `[MANUAL REVIEW NEEDED]`)
 - Remind them that this is a **draft** — hard claims (any numbers, ownership,
   regulatory status) still need manual review before commit
 - Remind them the skill did NOT commit anything — working tree is dirty for

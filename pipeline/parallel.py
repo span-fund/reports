@@ -27,8 +27,15 @@ OVERVIEW_TOTALSUPPLY_SCHEMA = {
             "type": "string",
             "description": "ISO-8601 date (YYYY-MM-DD) of the cited source",
         },
+        "confidence": {
+            "type": "number",
+            "description": (
+                "Self-assessed confidence in the totalSupply value, 0.0-1.0. "
+                "Use 0.9+ only when the primary source is authoritative and fresh."
+            ),
+        },
     },
-    "required": ["totalSupply", "evidence_url", "evidence_date"],
+    "required": ["totalSupply", "evidence_url", "evidence_date", "confidence"],
 }
 
 
@@ -57,6 +64,7 @@ def fetch_overview_total_supply(
         source_kind="parallel",
         evidence_url=output["evidence_url"],
         evidence_date=output["evidence_date"],
+        confidence=output.get("confidence"),
     )
     audit = {
         "task_id": response["task_id"],

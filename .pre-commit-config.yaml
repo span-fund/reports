@@ -3,21 +3,30 @@
 # Install once per clone:
 #     uv run pre-commit install
 #
-# Then every `git commit` will run ruff + pytest against changed pipeline files
-# and block the commit on any failure.
+# Mirrors CI exactly (.github/workflows/ci.yml): strict `ruff check`,
+# `ruff format --check`, then pytest against pipeline/. No auto-fix — if the
+# hook complains, run `uv run ruff check --fix pipeline/` and
+# `uv run ruff format pipeline/` manually before retrying the commit.
 
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.4
-    hooks:
-      - id: ruff
-        args: [--fix]
-        files: ^pipeline/
-      - id: ruff-format
-        files: ^pipeline/
-
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check (pipeline/)
+        entry: uv run ruff check pipeline/
+        language: system
+        pass_filenames: false
+        files: ^pipeline/
+        stages: [pre-commit]
+
+      - id: ruff-format-check
+        name: ruff format --check (pipeline/)
+        entry: uv run ruff format --check pipeline/
+        language: system
+        pass_filenames: false
+        files: ^pipeline/
+        stages: [pre-commit]
+
       - id: pytest
         name: pytest (pipeline/)
         entry: uv run pytest pipeline/ -x -q
