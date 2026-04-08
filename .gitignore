@@ -8,6 +8,9 @@ __pycache__/
 # uv / virtualenv
 .venv/
 
+# Transient dd-research cache (any namespace)
+**/_cache/
+
 # Secrets
 .env
 .env.local

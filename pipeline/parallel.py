@@ -23,7 +23,10 @@ OVERVIEW_TOTALSUPPLY_SCHEMA = {
             "description": "Primary token total supply (human units)",
         },
         "evidence_url": {"type": "string"},
-        "evidence_date": {"type": "string", "format": "date"},
+        "evidence_date": {
+            "type": "string",
+            "description": "ISO-8601 date (YYYY-MM-DD) of the cited source",
+        },
     },
     "required": ["totalSupply", "evidence_url", "evidence_date"],
 }
