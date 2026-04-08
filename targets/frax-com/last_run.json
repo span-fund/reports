@@ -6,30 +6,185 @@
     "jurisdiction": "skip",
     "tier": "lite",
     "soft_cap_usd": 5.0,
-    "slug": "frax-com"
+    "slug": "frax-com",
+    "confidence_threshold": 0.7
   },
   "findings": [
     {
-      "claim": "totalSupply",
-      "value": "99,681,495",
+      "claim": "frxusd_supply",
+      "value": "130 Million FRXUSD",
       "source": "parallel",
       "source_kind": "parallel",
-      "evidence_url": "https://tokenomist.ai/frax-share",
-      "evidence_date": "2026-04-08"
+      "evidence_url": "https://coinmarketcap.com/cmc-ai/frax-usd/price-prediction/",
+      "evidence_date": "2026-03-24",
+      "confidence": 1.0
     },
     {
-      "claim": "totalSupply",
-      "value": "118736234",
+      "claim": "frxusd_supply",
+      "value": "118645616",
       "source": "etherscan",
       "source_kind": "onchain",
       "evidence_url": "https://etherscan.io/token/0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
-      "evidence_date": "2026-04-08"
+      "evidence_date": "2026-04-08",
+      "confidence": null
+    },
+    {
+      "claim": "sfrxusd_supply",
+      "value": "33.26M SFRXUSD",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://coinmarketcap.com/currencies/staked-frax-usd",
+      "evidence_date": "2026-04-07",
+      "confidence": 0.7
+    },
+    {
+      "claim": "sfrxusd_supply",
+      "value": "22611905",
+      "source": "etherscan",
+      "source_kind": "onchain",
+      "evidence_url": "https://etherscan.io/token/0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6",
+      "evidence_date": "2026-04-08",
+      "confidence": null
+    },
+    {
+      "claim": "sfrxusd_total_assets",
+      "value": "$12,028,517",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://facts.frax.finance/frxusd/sfrxusd-balance-sheet",
+      "evidence_date": "2026-04-05",
+      "confidence": 0.3
+    },
+    {
+      "claim": "sfrxusd_total_assets",
+      "value": "26901657",
+      "source": "etherscan",
+      "source_kind": "onchain",
+      "evidence_url": "https://etherscan.io/address/0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6",
+      "evidence_date": "2026-04-08",
+      "confidence": null
+    },
+    {
+      "claim": "fxs_supply",
+      "value": "Not found",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "Not found",
+      "evidence_date": "Not found",
+      "confidence": 0.0
+    },
+    {
+      "claim": "fxs_supply",
+      "value": "99681495",
+      "source": "etherscan",
+      "source_kind": "onchain",
+      "evidence_url": "https://etherscan.io/token/0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0",
+      "evidence_date": "2026-04-08",
+      "confidence": null
+    },
+    {
+      "claim": "tvl_usd",
+      "value": "$277.26m",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://defillama.com/protocol/frax-finance",
+      "evidence_date": "2019-10-22",
+      "confidence": 1.0
+    },
+    {
+      "claim": "annual_revenue_usd",
+      "value": "$424,499",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://defillama.com/protocol/frax-finance",
+      "evidence_date": "2019-10-22",
+      "confidence": 1.0
+    },
+    {
+      "claim": "top_holders",
+      "value": "Not found",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "Not found",
+      "evidence_date": "Not found",
+      "confidence": 0.0
+    },
+    {
+      "claim": "mechanism_summary",
+      "value": "sfrxUSD targets a benchmark-rate strategy that alternates between carry-trade, algorithmic market operations (AMOs), and the Interest on Reserve Balances/T-Bill (IORB) rate to provide competitive yield.",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://coinmarketcap.com/currencies/staked-frax-usd",
+      "evidence_date": "2026-04-07",
+      "confidence": 1.0
     }
   ],
   "verdicts": {
-    "totalSupply": {
+    "frxusd_supply": {
       "tag": "\u26a0\ufe0f",
-      "rationale": "conflict on totalSupply: sources disagree (['118736234', '99,681,495'])"
+      "rationale": "conflict on frxusd_supply: sources disagree (['118645616', '130 Million FRXUSD'])"
+    },
+    "sfrxusd_supply": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "conflict on sfrxusd_supply: sources disagree (['22611905', '33.26M SFRXUSD'])"
+    },
+    "sfrxusd_total_assets": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "conflict on sfrxusd_total_assets: sources disagree (['$12,028,517', '26901657'])"
+    },
+    "fxs_supply": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "conflict on fxs_supply: sources disagree (['99681495', 'Not found'])"
+    },
+    "tvl_usd": {
+      "tag": "\u274c",
+      "rationale": "insufficient sources for tvl_usd: got 1, need >=2"
+    },
+    "annual_revenue_usd": {
+      "tag": "\u274c",
+      "rationale": "insufficient sources for annual_revenue_usd: got 1, need >=2"
+    },
+    "top_holders": {
+      "tag": "\u274c",
+      "rationale": "insufficient sources for top_holders: got 1, need >=2"
+    },
+    "mechanism_summary": {
+      "tag": "\u274c",
+      "rationale": "insufficient sources for mechanism_summary: got 1, need >=2"
+    }
+  },
+  "claims": {
+    "frxusd_supply": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "sfrxusd_supply": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "sfrxusd_total_assets": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "fxs_supply": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "tvl_usd": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "annual_revenue_usd": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "top_holders": {
+      "kind": "hard",
+      "requires_manual_review": true
+    },
+    "mechanism_summary": {
+      "kind": "soft",
+      "requires_manual_review": true
     }
   }
 }
