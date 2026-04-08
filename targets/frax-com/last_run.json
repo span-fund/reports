@@ -133,8 +133,8 @@
       "rationale": "conflict on sfrxusd_total_assets: sources disagree (['$12,028,517', '26901657'])"
     },
     "fxs_supply": {
-      "tag": "\u26a0\ufe0f",
-      "rationale": "conflict on fxs_supply: sources disagree (['99681495', 'Not found'])"
+      "tag": "\u274c",
+      "rationale": "parallel source returned no value for fxs_supply"
     },
     "tvl_usd": {
       "tag": "\u274c",

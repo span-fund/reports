@@ -6,7 +6,194 @@ Tests describe behaviour a user of the pipeline cares about — they should surv
 internal refactors that rename modules, split files, or swap data structures.
 """
 
-from pipeline.verdict_engine import Finding, decide
+from pipeline.verdict_engine import Finding, _normalize_numeric, decide
+
+
+def test_normalize_parses_million_suffix():
+    # Parallel returns "130 Million FRXUSD" while on-chain gives raw int.
+    # Normalizer must strip the token symbol and expand the Million suffix.
+    assert _normalize_numeric("130 Million FRXUSD") == 130_000_000
+
+
+def test_normalize_parses_decimal_m_suffix():
+    # Short form "33.26M" — decimal times million, token symbol tacked on.
+    assert _normalize_numeric("33.26M SFRXUSD") == 33_260_000
+
+
+def test_normalize_parses_dollar_and_commas():
+    # Parallel frequently formats dollar totals with $ prefix and thousand-commas.
+    assert _normalize_numeric("$12,028,517") == 12_028_517
+
+
+def test_normalize_parses_plain_integer():
+    # On-chain fetchers return raw scaled integers — must round-trip unchanged.
+    assert _normalize_numeric("118645616") == 118_645_616
+
+
+def test_normalize_parses_all_scale_suffixes():
+    # Full suffix alphabet: thousand / billion / trillion.
+    assert _normalize_numeric("500k") == 500_000
+    assert _normalize_numeric("2.5B") == 2_500_000_000
+    assert _normalize_numeric("1T") == 1_000_000_000_000
+    assert _normalize_numeric("3 billion") == 3_000_000_000
+    assert _normalize_numeric("1.2 trillion") == 1_200_000_000_000
+
+
+def test_normalize_returns_none_for_missing_values():
+    # Parallel returns "Not found" when it can't locate a figure; fetchers may
+    # return empty strings. These must surface as None, not accidentally parse
+    # into noise digits.
+    assert _normalize_numeric("Not found") is None
+    assert _normalize_numeric("") is None
+    assert _normalize_numeric("N/A") is None
+    assert _normalize_numeric("none") is None
+
+
+def test_normalize_returns_none_for_non_numeric_prose():
+    # Soft claims ("mechanism_summary") must not accidentally parse to an int
+    # — the normalizer falls back to None so string equality takes over.
+    assert _normalize_numeric("yield-bearing stablecoin") is None
+
+
+def test_numeric_claims_within_tolerance_yield_green_verdict():
+    # The frax-com live-run scenario: Parallel returns a formatted phrase,
+    # on-chain returns a raw int. They agree within the default 2% tolerance
+    # and should yield ✅ instead of the old string-equality ⚠️.
+    findings = [
+        Finding(
+            claim="frxusd_supply",
+            value="130 Million FRXUSD",
+            source="parallel",
+            source_kind="parallel",
+            evidence_url="https://example.com/docs",
+            evidence_date="2026-04-08",
+            confidence=0.9,
+        ),
+        Finding(
+            claim="frxusd_supply",
+            value="129500000",
+            source="etherscan",
+            source_kind="onchain",
+            evidence_url="https://etherscan.io/token/0xabc",
+            evidence_date="2026-04-08",
+        ),
+    ]
+
+    verdict = decide(claim="frxusd_supply", findings=findings, kind="hard")
+
+    assert verdict.tag == "✅"
+    # Hard claim → manual review stays True regardless.
+    assert verdict.requires_manual_review is True
+
+
+def test_numeric_claims_outside_tolerance_yield_warning():
+    # Inject a 20% delta — well outside the default 2% tolerance. ⚠️ must still
+    # fire so real disagreements are not swallowed by the normalizer.
+    findings = [
+        Finding(
+            claim="frxusd_supply",
+            value="130 Million FRXUSD",
+            source="parallel",
+            source_kind="parallel",
+            evidence_url="https://example.com/docs",
+            evidence_date="2026-04-08",
+        ),
+        Finding(
+            claim="frxusd_supply",
+            value="104000000",  # 20% lower
+            source="etherscan",
+            source_kind="onchain",
+            evidence_url="https://etherscan.io/token/0xabc",
+            evidence_date="2026-04-08",
+        ),
+    ]
+
+    verdict = decide(claim="frxusd_supply", findings=findings, kind="hard")
+
+    assert verdict.tag == "⚠️"
+    assert "conflict" in verdict.rationale.lower()
+
+
+def test_parallel_not_found_on_hard_claim_yields_red_not_warning():
+    # Parallel returning "Not found" is a MISSING value, not a conflicting
+    # one. Must surface as ❌ ("source could not provide value"), not ⚠️.
+    findings = [
+        Finding(
+            claim="fxs_supply",
+            value="Not found",
+            source="parallel",
+            source_kind="parallel",
+            evidence_url="https://example.com/docs",
+            evidence_date="2026-04-08",
+        ),
+        Finding(
+            claim="fxs_supply",
+            value="99681495",
+            source="etherscan",
+            source_kind="onchain",
+            evidence_url="https://etherscan.io/token/0xabc",
+            evidence_date="2026-04-08",
+        ),
+    ]
+
+    verdict = decide(claim="fxs_supply", findings=findings, kind="hard")
+
+    assert verdict.tag == "❌"
+    assert "no value" in verdict.rationale.lower()
+
+
+def test_numeric_tolerance_parameter_is_configurable():
+    # 5% delta: default 2% tolerance → ⚠️, caller-supplied 10% tolerance → ✅.
+    # Lets callers relax the threshold for noisy metrics (e.g. floating TVL).
+    findings = [
+        Finding(
+            claim="tvl_usd",
+            value="100000000",
+            source="parallel",
+            source_kind="parallel",
+            evidence_url="https://example.com/docs",
+            evidence_date="2026-04-08",
+        ),
+        Finding(
+            claim="tvl_usd",
+            value="95000000",  # 5% below
+            source="defillama",
+            source_kind="onchain",
+            evidence_url="https://defillama.com/x",
+            evidence_date="2026-04-08",
+        ),
+    ]
+
+    assert decide(claim="tvl_usd", findings=findings).tag == "⚠️"
+    assert decide(claim="tvl_usd", findings=findings, numeric_tolerance=0.10).tag == "✅"
+
+
+def test_non_numeric_soft_claim_falls_back_to_string_equality():
+    # Prose claims with different wording must still conflict — tolerance
+    # logic only kicks in when BOTH values parse to numbers.
+    findings = [
+        Finding(
+            claim="mechanism_summary",
+            value="yield-bearing stablecoin backed by delta-neutral strategy",
+            source="parallel",
+            source_kind="parallel",
+            evidence_url="https://example.com/docs",
+            evidence_date="2026-04-08",
+        ),
+        Finding(
+            claim="mechanism_summary",
+            value="algorithmic rebase token",
+            source="browser",
+            source_kind="browser",
+            evidence_url="https://example.com/blog",
+            evidence_date="2026-04-08",
+        ),
+    ]
+
+    verdict = decide(claim="mechanism_summary", findings=findings)
+
+    assert verdict.tag == "⚠️"
+    assert "conflict" in verdict.rationale.lower()
 
 
 def test_agreeing_parallel_and_nonparallel_sources_yield_green_verdict():

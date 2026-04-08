@@ -15,7 +15,53 @@ Policy:
 - Any non-✅ tag also requires manual review (something is wrong).
 """
 
+import re
 from dataclasses import dataclass
+
+_MISSING_TOKENS = {"", "not found", "n/a", "none"}
+_SCALE = {
+    "k": 1_000,
+    "m": 1_000_000,
+    "million": 1_000_000,
+    "b": 1_000_000_000,
+    "billion": 1_000_000_000,
+    "t": 1_000_000_000_000,
+    "trillion": 1_000_000_000_000,
+}
+_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(trillion|billion|million|k|m|b|t)?", re.IGNORECASE)
+
+
+def _missing_value(value: str) -> bool:
+    return value.strip().lower() in _MISSING_TOKENS
+
+
+def _all_numeric(findings: "list[Finding]") -> list[int] | None:
+    """Return normalized ints if EVERY finding parses numerically, else None."""
+    normalized = [_normalize_numeric(f.value) for f in findings]
+    if any(n is None for n in normalized):
+        return None
+    return [n for n in normalized if n is not None]
+
+
+def _normalize_numeric(value: str) -> int | None:
+    """Parse a formatted numeric string into a raw int.
+
+    Handles: plain ints, decimals, scale suffixes (k/M/B/T + long forms),
+    dollar/comma formatting, and trailing token tickers (ignored by the
+    regex, so listing every symbol is unnecessary). Returns None for
+    missing markers ("Not found", "", "N/A") and non-numeric prose so the
+    caller can fall back to string equality.
+    """
+    s = value.strip().lower()
+    if s in _MISSING_TOKENS:
+        return None
+    s = s.replace("$", "").replace(",", "")
+    match = _NUM_RE.search(s)
+    if not match:
+        return None
+    num = float(match.group(1))
+    suffix = (match.group(2) or "").lower()
+    return int(round(num * _SCALE.get(suffix, 1)))
 
 
 @dataclass(frozen=True)
@@ -42,8 +88,9 @@ def decide(
     findings: list[Finding],
     kind: str = "soft",
     confidence_threshold: float = 0.7,
+    numeric_tolerance: float = 0.02,
 ) -> Verdict:
-    tag, rationale = _strict_tag(claim, findings)
+    tag, rationale = _strict_tag(claim, findings, numeric_tolerance)
     requires_review = _needs_manual_review(
         tag=tag,
         kind=kind,
@@ -53,7 +100,7 @@ def decide(
     return Verdict(tag=tag, rationale=rationale, requires_manual_review=requires_review)
 
 
-def _strict_tag(claim: str, findings: list[Finding]) -> tuple[str, str]:
+def _strict_tag(claim: str, findings: list[Finding], numeric_tolerance: float) -> tuple[str, str]:
     if len(findings) < 2:
         return (
             "❌",
@@ -67,6 +114,29 @@ def _strict_tag(claim: str, findings: list[Finding]) -> tuple[str, str]:
                 ">=1 independent non-Parallel source"
             ),
         )
+    # Parallel with "Not found" / empty is a missing value, not a conflict.
+    if any(f.source_kind == "parallel" and _missing_value(f.value) for f in findings):
+        return (
+            "❌",
+            f"parallel source returned no value for {claim}",
+        )
+    # Numeric path: if every finding parses to an int, compare with tolerance.
+    nums = _all_numeric(findings)
+    if nums is not None:
+        max_val = max(abs(n) for n in nums)
+        min_val = min(abs(n) for n in nums)
+        spread = (max_val - min_val) / max_val if max_val > 0 else 0.0
+        if spread < numeric_tolerance:
+            return (
+                "✅",
+                f"{len(findings)} sources agree on {claim}≈{max_val} "
+                f"(spread {spread:.2%} < tol {numeric_tolerance:.2%})",
+            )
+        return (
+            "⚠️",
+            f"conflict on {claim}: sources disagree ({sorted(f.value for f in findings)})",
+        )
+    # Fallback: string equality for non-numeric claims.
     values = {f.value for f in findings}
     if len(values) > 1:
         return (
