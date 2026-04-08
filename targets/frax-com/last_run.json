@@ -1,0 +1,35 @@
+{
+  "config": {
+    "target_type": "protocol",
+    "domain": "frax.com",
+    "chain": "ethereum",
+    "jurisdiction": "skip",
+    "tier": "lite",
+    "soft_cap_usd": 5.0,
+    "slug": "frax-com"
+  },
+  "findings": [
+    {
+      "claim": "totalSupply",
+      "value": "99,681,495",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://tokenomist.ai/frax-share",
+      "evidence_date": "2026-04-08"
+    },
+    {
+      "claim": "totalSupply",
+      "value": "118736234",
+      "source": "etherscan",
+      "source_kind": "onchain",
+      "evidence_url": "https://etherscan.io/token/0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
+      "evidence_date": "2026-04-08"
+    }
+  ],
+  "verdicts": {
+    "totalSupply": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "conflict on totalSupply: sources disagree (['118736234', '99,681,495'])"
+    }
+  }
+}

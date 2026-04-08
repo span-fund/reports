@@ -1,0 +1,9 @@
+{
+  "target_type": "protocol",
+  "domain": "frax.com",
+  "chain": "ethereum",
+  "jurisdiction": "skip",
+  "tier": "lite",
+  "soft_cap_usd": 5.0,
+  "slug": "frax-com"
+}
