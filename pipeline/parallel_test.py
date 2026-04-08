@@ -15,9 +15,7 @@ class FakeParallelClient:
         self.calls: list[dict] = []
 
     def run_task(self, *, processor: str, schema: dict, prompt: str) -> dict:
-        self.calls.append(
-            {"processor": processor, "schema": schema, "prompt": prompt}
-        )
+        self.calls.append({"processor": processor, "schema": schema, "prompt": prompt})
         return self.response
 
 

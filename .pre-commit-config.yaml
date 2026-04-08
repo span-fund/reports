@@ -1,0 +1,27 @@
+# Pre-commit hooks for the dd-research pipeline.
+#
+# Install once per clone:
+#     uv run pre-commit install
+#
+# Then every `git commit` will run ruff + pytest against changed pipeline files
+# and block the commit on any failure.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^pipeline/
+      - id: ruff-format
+        files: ^pipeline/
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (pipeline/)
+        entry: uv run pytest pipeline/ -x -q
+        language: system
+        pass_filenames: false
+        files: ^pipeline/
+        stages: [pre-commit]
