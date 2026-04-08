@@ -13,15 +13,22 @@ from pathlib import Path
 from typing import Any
 
 from pipeline.audit_log import append_parallel_run
+from pipeline.cache import Cache
 from pipeline.cost_guard import check_cost
 from pipeline.env_check import require_env_vars
 from pipeline.etherscan import fetch_total_supply
 from pipeline.parallel import ParallelClient, fetch_overview_total_supply
 from pipeline.section_renderer import render_overview
-from pipeline.verdict_engine import decide
+from pipeline.verdict_engine import Finding, decide
 from pipeline.wizard import TargetConfig
 
 REQUIRED_ENV = ["PARALLEL_API_KEY", "ETHERSCAN_API_KEY"]
+
+# TTLs per cache namespace — see plans/dd-research-implementation.md
+CACHE_TTLS = {
+    "parallel": 7 * 86400,  # 7 days
+    "onchain": 3600,  # 1 hour
+}
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,7 @@ def run_dd_new(
     env: Mapping[str, str],
     parallel_client: ParallelClient,
     http_get: Callable[[str, dict], dict],
+    cache_root: Path | None = None,
 ) -> DDRunResult:
     # 1. Fail-fast on missing env vars
     require_env_vars(env, REQUIRED_ENV)
@@ -54,14 +62,21 @@ def run_dd_new(
     # 4. Persist config
     (target_dir / "config.json").write_text(_json_dumps(asdict(config)))
 
-    # 5. Parallel + Etherscan in "parallel" (sequential is fine for tracer)
-    parallel_finding, audit = fetch_overview_total_supply(
-        target_name=config.slug,
-        target_domain=config.domain,
-        tier=config.tier,
-        client=parallel_client,
-    )
-    append_parallel_run(target_dir / "parallel-runs.jsonl", audit)
+    # 5. Parallel (cache-aware) + Etherscan
+    cache = Cache(root=cache_root or targets_root / "_cache", ttls=CACHE_TTLS)
+    parallel_cache_key = f"overview:totalSupply:{config.slug}:{config.tier}"
+    cached = cache.get(config.slug, "parallel", parallel_cache_key)
+    if cached is not None:
+        parallel_finding = _finding_from_dict(cached)
+    else:
+        parallel_finding, audit = fetch_overview_total_supply(
+            target_name=config.slug,
+            target_domain=config.domain,
+            tier=config.tier,
+            client=parallel_client,
+        )
+        cache.set(config.slug, "parallel", parallel_cache_key, _finding_to_dict(parallel_finding))
+        append_parallel_run(target_dir / "parallel-runs.jsonl", audit)
 
     onchain_finding = fetch_total_supply(
         chain_id=1,  # ethereum mainnet for tracer
@@ -109,6 +124,17 @@ def _finding_to_dict(f: Any) -> dict[str, str]:
         "evidence_url": f.evidence_url,
         "evidence_date": f.evidence_date,
     }
+
+
+def _finding_from_dict(d: dict[str, str]) -> Finding:
+    return Finding(
+        claim=d["claim"],
+        value=d["value"],
+        source=d["source"],
+        source_kind=d["source_kind"],
+        evidence_url=d["evidence_url"],
+        evidence_date=d["evidence_date"],
+    )
 
 
 def _json_dumps(obj: Any) -> str:

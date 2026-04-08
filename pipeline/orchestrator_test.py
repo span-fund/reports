@@ -83,3 +83,58 @@ def test_run_dd_new_produces_full_target_directory(tmp_path):
     # Return value is useful to the skill layer
     assert result.verdict_tag == "✅"
     assert result.target_dir == target_dir
+
+
+def test_rerun_same_day_uses_parallel_cache(tmp_path):
+    # Re-running the same DD the same day must NOT call Parallel again — the
+    # cached response is served and no second audit line is appended.
+    config = TargetConfig(
+        target_type="protocol",
+        domain="ethena.fi",
+        chain="ethereum",
+        jurisdiction="us",
+        tier="lite",
+        soft_cap_usd=2.0,
+        slug="ethena-fi",
+    )
+
+    parallel_client = FakeParallelClient(
+        response={
+            "task_id": "task-abc",
+            "cost_usd": 0.42,
+            "output": {
+                "totalSupply": "1000000",
+                "evidence_url": "https://ethena.fi/stats",
+                "evidence_date": "2026-04-08",
+            },
+        }
+    )
+
+    def fake_http_get(url, params):
+        return {"status": "1", "result": "1000000000000000000000000"}
+
+    env = {"PARALLEL_API_KEY": "p-xxx", "ETHERSCAN_API_KEY": "e-yyy"}
+
+    kwargs = dict(
+        config=config,
+        token_address="0xabc",
+        token_decimals=18,
+        cost_preview_usd=0.50,
+        targets_root=tmp_path,
+        env=env,
+        parallel_client=parallel_client,
+        http_get=fake_http_get,
+        cache_root=tmp_path / "_cache",
+    )
+
+    run_dd_new(**kwargs)
+    assert len(parallel_client.calls) == 1
+
+    run_dd_new(**kwargs)
+    # Second run hit the cache — no new Parallel call.
+    assert len(parallel_client.calls) == 1
+
+    # Audit log still has a single line (cached calls are not re-audited).
+    target_dir = tmp_path / "ethena-fi"
+    audit_lines = (target_dir / "parallel-runs.jsonl").read_text().splitlines()
+    assert len(audit_lines) == 1
