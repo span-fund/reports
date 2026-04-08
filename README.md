@@ -18,3 +18,21 @@
 - Credit rating: S&P Global Ratings
 
 All claims marked as verified have at least one primary source (on-chain data, official documentation, or legal registry). Claims that could not be independently verified are excluded or explicitly flagged.
+
+## Development setup
+
+The `pipeline/` directory contains the `dd-research` skill implementation (Python, uv). After cloning:
+
+```
+uv sync
+uv run pre-commit install
+```
+
+This installs dev dependencies and activates the pre-commit hook that runs `ruff` and `pytest` against `pipeline/` on every commit.
+
+Required env vars (see `.env.example`):
+
+- `PARALLEL_API_KEY` — Parallel.ai SDK/CLI
+- `ETHERSCAN_API_KEY` — Etherscan V2 (chainid-aware)
+
+Copy `.env.example` to `.env` and fill in real values. `.env` is gitignored.
