@@ -144,3 +144,84 @@ def test_fetch_overview_claims_single_call_returns_finding_per_claim():
     # Audit record logged once for the whole task
     assert audit["task_id"] == "task-abc"
     assert audit["cost_usd"] == 1.25
+
+
+def test_fetch_overview_claims_passes_through_cost_source():
+    """The client response may carry a `cost_source` marker distinguishing
+    an estimated price (from the local pricing table) from an actual billed
+    cost. The audit record must preserve it so downstream reports can tell
+    them apart.
+    """
+    claims = [
+        OverviewClaim(
+            name="tvl_usd",
+            kind="hard",
+            display_label="TVL",
+            parallel_field="tvl_usd",
+            onchain=None,
+        ),
+    ]
+    client = FakeParallelClient(
+        response={
+            "task_id": "task-xyz",
+            "cost_usd": 0.005,
+            "cost_source": "estimated",
+            "output": {
+                "tvl_usd": {
+                    "value": "1",
+                    "evidence_url": "https://x",
+                    "evidence_date": "2026-04-08",
+                    "confidence": 0.9,
+                },
+            },
+        }
+    )
+
+    _, audit = fetch_overview_claims(
+        target_name="x",
+        target_domain="x.y",
+        tier="lite",
+        claims=claims,
+        client=client,
+    )
+
+    assert audit["cost_usd"] == 0.005
+    assert audit["cost_source"] == "estimated"
+
+
+def test_fetch_overview_claims_defaults_cost_source_when_client_omits_it():
+    """Backward-compat: older clients may not set `cost_source`. Default to
+    "estimated" because that's how all current callers actually price runs."""
+    claims = [
+        OverviewClaim(
+            name="tvl_usd",
+            kind="hard",
+            display_label="TVL",
+            parallel_field="tvl_usd",
+            onchain=None,
+        ),
+    ]
+    client = FakeParallelClient(
+        response={
+            "task_id": "task-xyz",
+            "cost_usd": 0.005,
+            "output": {
+                "tvl_usd": {
+                    "value": "1",
+                    "evidence_url": "https://x",
+                    "evidence_date": "2026-04-08",
+                    "confidence": 0.9,
+                },
+            },
+        }
+    )
+
+    _, audit = fetch_overview_claims(
+        target_name="x",
+        target_domain="x.y",
+        tier="lite",
+        claims=claims,
+        client=client,
+    )
+
+    assert audit["cost_source"] == "estimated"

@@ -71,6 +71,7 @@ def fetch_overview_total_supply(
         "task_id": response["task_id"],
         "processor": tier,
         "cost_usd": response["cost_usd"],
+        "cost_source": response.get("cost_source", "estimated"),
         "timestamp": datetime.now(UTC).isoformat(),
     }
     return finding, audit
@@ -164,6 +165,7 @@ def fetch_overview_claims(
         "task_id": response["task_id"],
         "processor": tier,
         "cost_usd": response["cost_usd"],
+        "cost_source": response.get("cost_source", "estimated"),
         "timestamp": datetime.now(UTC).isoformat(),
     }
     return findings, audit

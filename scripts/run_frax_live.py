@@ -19,6 +19,7 @@ from typing import Any
 from parallel import Parallel
 
 from pipeline.orchestrator import run_dd_new
+from pipeline.parallel_pricing import lookup_task_cost
 from pipeline.wizard import TargetConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,7 +44,24 @@ def _http_get(url: str, params: dict) -> dict:
 
 class ParallelAdapter:
     """Adapts the real `parallel` SDK to the narrow ParallelClient protocol
-    the orchestrator / pipeline/parallel.py depends on."""
+    the orchestrator / pipeline/parallel.py depends on.
+
+    Cost accounting (issue #12)
+    ---------------------------
+    The parallel-web Python SDK does NOT expose billed cost on `TaskRun` or
+    `TaskRunResult`. Verified against parallel-web/parallel-sdk-python:
+    `TaskRun` fields are {created_at, modified_at, processor, run_id, status,
+    metadata, warnings, interaction_id, task_group_id} — `metadata` is a
+    user-supplied dict, not pricing. Only the beta `extract`/`search` endpoints
+    carry a `usage: List[UsageItem]` list, and that reports SKU counts, not
+    dollars.
+
+    We therefore derive `cost_usd` from a local pricing table keyed by
+    processor (`pipeline.parallel_pricing.lookup_task_cost`) and stamp the
+    audit record with `cost_source="estimated"`. If/when the SDK starts to
+    expose billed cost, swap in "actual" and the existing audit schema will
+    continue to work unchanged.
+    """
 
     def __init__(self, client: Parallel):
         self._client = client
@@ -60,10 +78,7 @@ class ParallelAdapter:
             },
         )
         result = self._client.task_run.result(run_id=task.run_id)
-        cost_usd = 0.0
-        meta = getattr(result.run, "metadata", None) or {}
-        if isinstance(meta, dict):
-            cost_usd = float(meta.get("cost_usd", 0.0) or 0.0)
+        cost_usd, cost_source = lookup_task_cost(processor)
         output = result.output
         # JSON output exposes .content; text output exposes .content too.
         content = getattr(output, "content", output)
@@ -72,6 +87,7 @@ class ParallelAdapter:
         return {
             "task_id": task.run_id,
             "cost_usd": cost_usd,
+            "cost_source": cost_source,
             "output": content,
         }
 
