@@ -1,5 +1,7 @@
 # Due Diligence Reports
 
+[![CI](https://github.com/span-fund/reports/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/span-fund/reports/actions/workflows/ci.yml)
+
 ## Reports
 
 | Report | Subject | Date | Status |

@@ -115,7 +115,10 @@ def main() -> None:
 
     parallel_client = ParallelAdapter(Parallel(api_key=os.environ["PARALLEL_API_KEY"]))
 
-    print(f"=> target: {config.slug} ({config.domain}), tier={config.tier}, cap=${config.soft_cap_usd}")
+    print(
+        f"=> target: {config.slug} ({config.domain}), "
+        f"tier={config.tier}, cap=${config.soft_cap_usd}"
+    )
     print(f"=> manifest: {manifest_path}")
 
     result = run_dd_new(

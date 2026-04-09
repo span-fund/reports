@@ -3,28 +3,29 @@
 # Install once per clone:
 #     uv run pre-commit install
 #
-# Mirrors CI exactly (.github/workflows/ci.yml): strict `ruff check`,
-# `ruff format --check`, then pytest against pipeline/. No auto-fix — if the
-# hook complains, run `uv run ruff check --fix pipeline/` and
-# `uv run ruff format pipeline/` manually before retrying the commit.
+# Mirrors CI exactly (.github/workflows/ci.yml): strict `ruff check` +
+# `ruff format --check` against both pipeline/ and scripts/, then pytest
+# against pipeline/. No auto-fix — if the hook complains, run
+# `uv run ruff check --fix pipeline/ scripts/` and
+# `uv run ruff format pipeline/ scripts/` manually before retrying the commit.
 
 repos:
   - repo: local
     hooks:
       - id: ruff-check
-        name: ruff check (pipeline/)
-        entry: uv run ruff check pipeline/
+        name: ruff check (pipeline/ scripts/)
+        entry: uv run ruff check pipeline/ scripts/
         language: system
         pass_filenames: false
-        files: ^pipeline/
+        files: ^(pipeline|scripts)/
         stages: [pre-commit]
 
       - id: ruff-format-check
-        name: ruff format --check (pipeline/)
-        entry: uv run ruff format --check pipeline/
+        name: ruff format --check (pipeline/ scripts/)
+        entry: uv run ruff format --check pipeline/ scripts/
         language: system
         pass_filenames: false
-        files: ^pipeline/
+        files: ^(pipeline|scripts)/
         stages: [pre-commit]
 
       - id: pytest
