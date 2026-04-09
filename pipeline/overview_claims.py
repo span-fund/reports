@@ -19,6 +19,9 @@ class OnchainSpec:
     fetcher: str  # "total_supply" | "contract_read" | "token_balance"
     contract: str
     decimals: int
+    # e.g. "ethereum", "base", "arbitrum" — used both for on-chain RPC routing
+    # and Parallel prompt hints (issue #13).
+    chain: str
     selector: str | None = None
     holder: str | None = None
 
@@ -42,6 +45,7 @@ def load_overview_claims(path: Path) -> list[OverviewClaim]:
                 fetcher=onchain_raw["fetcher"],
                 contract=onchain_raw["contract"],
                 decimals=onchain_raw["decimals"],
+                chain=onchain_raw["chain"],
                 selector=onchain_raw.get("selector"),
                 holder=onchain_raw.get("holder"),
             )

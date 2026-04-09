@@ -24,6 +24,7 @@ def test_load_overview_claims_parses_all_fetcher_kinds(tmp_path: Path):
                     "fetcher": "total_supply",
                     "contract": "0xabc",
                     "decimals": 18,
+                    "chain": "ethereum",
                 },
             },
             {
@@ -36,6 +37,7 @@ def test_load_overview_claims_parses_all_fetcher_kinds(tmp_path: Path):
                     "contract": "0xdef",
                     "selector": "0x01e1d114",
                     "decimals": 18,
+                    "chain": "base",
                 },
             },
             {
@@ -65,11 +67,13 @@ def test_load_overview_claims_parses_all_fetcher_kinds(tmp_path: Path):
     assert supply.onchain.fetcher == "total_supply"
     assert supply.onchain.contract == "0xabc"
     assert supply.onchain.decimals == 18
+    assert supply.onchain.chain == "ethereum"
 
     total_assets = claims[1]
     assert total_assets.onchain is not None
     assert total_assets.onchain.fetcher == "contract_read"
     assert total_assets.onchain.selector == "0x01e1d114"
+    assert total_assets.onchain.chain == "base"
 
     # Soft claim with no on-chain verifier (Parallel-only)
     mechanism = claims[2]

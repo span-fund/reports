@@ -8,7 +8,8 @@
       "onchain": {
         "fetcher": "total_supply",
         "contract": "0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
-        "decimals": 18
+        "decimals": 18,
+        "chain": "ethereum"
       }
     },
     {
@@ -19,7 +20,8 @@
       "onchain": {
         "fetcher": "total_supply",
         "contract": "0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6",
-        "decimals": 18
+        "decimals": 18,
+        "chain": "ethereum"
       }
     },
     {
@@ -31,7 +33,8 @@
         "fetcher": "contract_read",
         "contract": "0xcf62F905562626CfcDD2261162a51fd02Fc9c5b6",
         "selector": "0x01e1d114",
-        "decimals": 18
+        "decimals": 18,
+        "chain": "ethereum"
       }
     },
     {
@@ -42,7 +45,8 @@
       "onchain": {
         "fetcher": "total_supply",
         "contract": "0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0",
-        "decimals": 18
+        "decimals": 18,
+        "chain": "ethereum"
       }
     },
     {

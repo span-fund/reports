@@ -117,6 +117,112 @@ def build_overview_schema(claims: list[OverviewClaim]) -> dict[str, Any]:
     }
 
 
+def _build_overview_prompt(
+    *,
+    target_name: str,
+    target_domain: str,
+    claims: list[OverviewClaim],
+    max_chars: int = 4000,
+) -> str:
+    """Compose the Parallel prompt for an Overview manifest.
+
+    For every claim that carries an `OnchainSpec`, the prompt embeds a hint
+    naming the contract address, the chain, and (where applicable) the
+    function selector — this is what eliminates the "Not found" failure
+    mode for well-known tokens that Parallel previously had to guess at
+    (issue #13). Hints also steer toward authoritative sources (Etherscan,
+    project docs) over aggregators (CMC, CoinGecko, DefiLlama) which drift
+    more.
+
+    The prompt is bounded by `max_chars`. If the full hinted prompt would
+    overflow, hints are dropped from trailing claims (keeping their bare
+    `- field: label` line) and a `[...truncated]` marker is appended so the
+    truncation is visible in the audit log.
+    """
+    header = [
+        f"Research the Overview section for {target_name} ({target_domain}).",
+        "For every field below, return the best current value plus the primary "
+        "source URL and its publication date.",
+        "",
+        "Fields:",
+    ]
+
+    full_lines = [_render_claim_line(c) for c in claims]
+    bare_lines = [f"- {c.parallel_field}: {c.display_label}" for c in claims]
+
+    # Try the fully-hinted prompt first; if it overflows, demote trailing
+    # claims to bare lines until we fit, then append a truncation marker.
+    rendered = full_lines[:]
+    truncated = False
+    while True:
+        candidate = "\n".join(header + rendered)
+        if truncated:
+            candidate = candidate + "\n[...truncated]"
+        if len(candidate) <= max_chars:
+            return candidate
+        # Find the last fully-hinted line and demote it to bare.
+        demoted_any = False
+        for i in range(len(rendered) - 1, -1, -1):
+            if rendered[i] != bare_lines[i]:
+                rendered[i] = bare_lines[i]
+                demoted_any = True
+                truncated = True
+                break
+        if not demoted_any:
+            # All hints already stripped — return as-is even if still over
+            # (caller's max_chars is unreachably small for the bare list).
+            return candidate
+
+
+# ERC standard function selectors that Parallel can be told about by name.
+# ERC-20 metadata + balance and the ERC-4626 vault accounting surface — these
+# are the selectors we expect to see on Overview claims for token & vault
+# targets. Anything outside this set falls back to the raw 4-byte selector.
+_KNOWN_SELECTORS = {
+    # ERC-20
+    "0x06fdde03": "name()",
+    "0x95d89b41": "symbol()",
+    "0x313ce567": "decimals()",
+    "0x18160ddd": "totalSupply()",
+    "0x70a08231": "balanceOf(address)",
+    # ERC-4626 vault
+    "0x01e1d114": "totalAssets()",
+    "0x07a2d13a": "convertToAssets(uint256)",
+}
+
+
+def _selector_label(selector: str) -> str:
+    return _KNOWN_SELECTORS.get(selector.lower(), f"function selector {selector}")
+
+
+def _render_claim_line(claim: OverviewClaim) -> str:
+    base = f"- {claim.parallel_field}: {claim.display_label}"
+    spec = claim.onchain
+    if spec is None:
+        return base
+    if spec.fetcher == "total_supply":
+        hint = (
+            f". This is the ERC-20 at `{spec.contract}` on {spec.chain} mainnet. "
+            "Cite Etherscan or the official project docs, not third-party aggregators."
+        )
+    elif spec.fetcher == "contract_read":
+        fn_label = _selector_label(spec.selector or "")
+        hint = (
+            f". Read the `{fn_label}` function of the contract at `{spec.contract}` "
+            f"on {spec.chain} mainnet. Cite Etherscan or the official project docs, "
+            "not third-party aggregators."
+        )
+    elif spec.fetcher == "token_balance":
+        hint = (
+            f". This is the ERC-20 token balance held by `{spec.holder}` "
+            f"of the token at `{spec.contract}` on {spec.chain} mainnet. "
+            "Cite Etherscan or the official project docs, not third-party aggregators."
+        )
+    else:
+        hint = ""
+    return base + hint
+
+
 def fetch_overview_claims(
     *,
     target_name: str,
@@ -132,16 +238,11 @@ def fetch_overview_claims(
     the same canonical claim name).
     """
     schema = build_overview_schema(claims)
-    lines = [
-        f"Research the Overview section for {target_name} ({target_domain}).",
-        "For every field below, return the best current value plus the primary "
-        "source URL and its publication date.",
-        "",
-        "Fields:",
-    ]
-    for claim in claims:
-        lines.append(f"- {claim.parallel_field}: {claim.display_label}")
-    prompt = "\n".join(lines)
+    prompt = _build_overview_prompt(
+        target_name=target_name,
+        target_domain=target_domain,
+        claims=claims,
+    )
 
     response = client.run_task(processor=tier, schema=schema, prompt=prompt)
     output = response["output"]
