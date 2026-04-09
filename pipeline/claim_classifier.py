@@ -14,6 +14,13 @@ _RULES: dict[str, dict[str, str]] = {
     "Overview": {
         "totalSupply": "hard",
     },
+    "Team": {
+        # Anything that maps to who-controls-the-company or who-is-on-the-hook
+        # is hard. Bios and narrative context are soft.
+        "ownership_structure": "hard",
+        "team_credentials": "hard",
+        "cap_table_changes": "hard",
+    },
 }
 
 

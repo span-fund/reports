@@ -9,6 +9,86 @@ internal refactors that rename modules, split files, or swap data structures.
 from pipeline.verdict_engine import Finding, _normalize_numeric, decide
 
 
+def _legal_finding(claim: str, value: str) -> Finding:
+    return Finding(
+        claim=claim,
+        value=value,
+        source="krs",
+        source_kind="legal",
+        evidence_url="https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+        evidence_date="2026-04-09",
+    )
+
+
+def _parallel_finding(claim: str, value: str, confidence: float = 0.95) -> Finding:
+    return Finding(
+        claim=claim,
+        value=value,
+        source="parallel",
+        source_kind="parallel",
+        evidence_url="https://example.com/about",
+        evidence_date="2026-04-09",
+        confidence=confidence,
+    )
+
+
+def _onchain_finding(claim: str, value: str) -> Finding:
+    return Finding(
+        claim=claim,
+        value=value,
+        source="etherscan",
+        source_kind="onchain",
+        evidence_url="https://etherscan.io/address/0xabc",
+        evidence_date="2026-04-09",
+    )
+
+
+def test_requires_legal_yields_warning_when_no_legal_source_present():
+    """Ownership claims must be cross-checked against a registry. Even with a
+    clean parallel+onchain agreement, missing legal source must downgrade
+    the verdict to ⚠️ so the analyst sees the open question."""
+    findings = [
+        _parallel_finding("owner:Anna Nowak", "50%"),
+        _onchain_finding("owner:Anna Nowak", "50%"),
+    ]
+    verdict = decide(
+        claim="owner:Anna Nowak",
+        findings=findings,
+        kind="hard",
+        requires_legal=True,
+    )
+    assert verdict.tag == "⚠️"
+    assert "registry" in verdict.rationale.lower()
+    assert verdict.requires_manual_review is True
+
+
+def test_requires_legal_passes_when_legal_source_confirms():
+    findings = [
+        _parallel_finding("officer:Jan Kowalski", "Prezes Zarządu"),
+        _legal_finding("officer:Jan Kowalski", "Prezes Zarządu"),
+    ]
+    verdict = decide(
+        claim="officer:Jan Kowalski",
+        findings=findings,
+        kind="hard",
+        requires_legal=True,
+    )
+    assert verdict.tag == "✅"
+    # Hard claim still flips manual_review on regardless
+    assert verdict.requires_manual_review is True
+
+
+def test_requires_legal_default_false_preserves_existing_behaviour():
+    """Existing Overview claims (totalSupply etc.) must keep working — the
+    new flag defaults to off and parallel+onchain alone still passes."""
+    findings = [
+        _parallel_finding("totalSupply", "1000000"),
+        _onchain_finding("totalSupply", "1000000"),
+    ]
+    verdict = decide(claim="totalSupply", findings=findings, kind="hard")
+    assert verdict.tag == "✅"
+
+
 def test_normalize_parses_million_suffix():
     # Parallel returns "130 Million FRXUSD" while on-chain gives raw int.
     # Normalizer must strip the token symbol and expand the Million suffix.

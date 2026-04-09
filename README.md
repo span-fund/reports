@@ -36,3 +36,12 @@ Required env vars (see `.env.example`):
 - `ETHERSCAN_API_KEY` — Etherscan V2 (chainid-aware)
 
 Copy `.env.example` to `.env` and fill in real values. `.env` is gitignored.
+
+## Licence
+
+Dual-licensed:
+
+- **Source code** (everything under `pipeline/`, `scripts/`, `skills/`, plus build configuration) — [MIT](LICENSE).
+- **Report content** (`<target>/README.md`, `<target>/last_run.json`, `<target>/parallel-runs.jsonl`, prose under `plans/` and `targets/`) — [Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)](LICENSE-content).
+
+Third-party data sources retain their own licence terms — see `LICENSE-content` for the full attribution list.

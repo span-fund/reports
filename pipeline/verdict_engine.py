@@ -89,8 +89,25 @@ def decide(
     kind: str = "soft",
     confidence_threshold: float = 0.7,
     numeric_tolerance: float = 0.02,
+    requires_legal: bool = False,
 ) -> Verdict:
     tag, rationale = _strict_tag(claim, findings, numeric_tolerance)
+    # Ownership / officer claims must be confirmed by a legal registry. Even
+    # a clean parallel+onchain ✅ gets downgraded to ⚠️ when no source carries
+    # source_kind="legal" — the analyst needs to see the open question
+    # explicitly (Czarnecki lesson: registry-confirmed names changed silently
+    # while public sources still claimed the old composition).
+    if requires_legal and findings and not any(f.source_kind == "legal" for f in findings):
+        # The actionable framing for an analyst is "registry didn't confirm
+        # this name", regardless of whether STRICT would otherwise have said
+        # ✅ (parallel + onchain agreed) or ❌ (parallel only). Both collapse
+        # to ⚠️ + the same "no registry confirmation" rationale so the
+        # follow-up is consistent — go check KRS / OpenCorporates.
+        tag = "⚠️"
+        rationale = (
+            f"no registry confirmation for {claim}: legal verifier required "
+            "but no source_kind=legal finding present"
+        )
     requires_review = _needs_manual_review(
         tag=tag,
         kind=kind,

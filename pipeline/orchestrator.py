@@ -24,6 +24,7 @@ from pipeline.etherscan import fetch_contract_read, fetch_token_balance, fetch_t
 from pipeline.overview_claims import OnchainSpec, OverviewClaim, load_overview_claims
 from pipeline.parallel import ParallelClient, fetch_overview_claims
 from pipeline.section_renderer import render_overview
+from pipeline.team_orchestrator import TeamSectionResult, run_team_section
 from pipeline.verdict_engine import Finding, Verdict, decide
 from pipeline.wizard import TargetConfig
 
@@ -33,6 +34,7 @@ REQUIRED_ENV = ["PARALLEL_API_KEY", "ETHERSCAN_API_KEY"]
 CACHE_TTLS = {
     "parallel": 7 * 86400,  # 7 days
     "onchain": 3600,  # 1 hour
+    "legal": 30 * 86400,  # 30 days — legal-registry data drifts slowly
 }
 
 
@@ -55,6 +57,8 @@ def run_dd_new(
     http_get: Callable[[str, dict], dict],
     cache_root: Path | None = None,
     chain_id: int = 1,
+    team_claims_path: Path | None = None,
+    legal_adapter: Callable[[], list[Finding]] | None = None,
 ) -> DDRunResult:
     # 1. Fail-fast on missing env vars
     require_env_vars(env, REQUIRED_ENV)
@@ -153,12 +157,40 @@ def run_dd_new(
 
     # 7. Render Overview
     section = {"target_name": config.slug, "claims": rendered_claims}
-    (target_dir / "README.md").write_text(render_overview(section))
+    overview_md = render_overview(section)
+
+    # 7b. Run Team section for combined / company targets when a manifest is
+    #     provided. The Team flow has its own orchestrator (team_orchestrator)
+    #     and shares the same Cache instance, so legal-registry namespace TTL
+    #     and parallel cache stay coherent across sections.
+    team_result: TeamSectionResult | None = None
+    if team_claims_path is not None and config.target_type in {"combined", "company"}:
+        team_result = run_team_section(
+            config=config,
+            team_claims_path=team_claims_path,
+            cache=cache,
+            parallel_client=parallel_client,
+            legal_adapter=legal_adapter or (lambda: []),
+            target_dir=target_dir,
+        )
+        readme = overview_md + "\n\n" + team_result.markdown
+    else:
+        readme = overview_md
+    (target_dir / "README.md").write_text(readme)
+
+    # Merge team data into the run-level outputs.
+    findings_out = [_finding_to_dict(f) for c in rendered_claims for f in c["findings"]]
+    if team_result is not None:
+        for f in team_result.findings:
+            findings_out.append(_finding_to_dict(f))
+        verdicts_out.update(team_result.verdicts)
+        claims_out.update(team_result.claims)
+        manual_review.extend(team_result.manual_review_claims)
 
     # 8. Persist last_run.json — deterministic ground truth
     last_run: dict[str, Any] = {
         "config": asdict(config),
-        "findings": [_finding_to_dict(f) for c in rendered_claims for f in c["findings"]],
+        "findings": findings_out,
         "verdicts": verdicts_out,
         "claims": claims_out,
     }

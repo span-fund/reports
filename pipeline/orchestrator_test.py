@@ -17,6 +17,7 @@ from pathlib import Path
 
 from pipeline.orchestrator import run_dd_new
 from pipeline.parallel_test import FakeParallelClient
+from pipeline.verdict_engine import Finding
 from pipeline.wizard import TargetConfig
 
 
@@ -391,3 +392,205 @@ def test_low_confidence_on_hard_claim_emits_warning(tmp_path):
     assert "frxusd_supply" in result.manual_review_claims
     assert any("frxusd_supply" in w for w in result.warnings)
     assert any("confidence" in w.lower() for w in result.warnings)
+
+
+def _combined_pl_config() -> TargetConfig:
+    return TargetConfig(
+        target_type="combined",
+        domain="foo.pl",
+        chain="ethereum",
+        jurisdiction="PL",
+        tier="lite",
+        soft_cap_usd=2.0,
+        slug="foo-pl",
+        confidence_threshold=0.7,
+    )
+
+
+def test_combined_target_runs_team_section_after_overview(tmp_path):
+    """For combined / company targets the orchestrator runs the Team flow
+    after Overview: appends Team markdown to README, merges Team verdicts/
+    findings into last_run.json, and surfaces team manual-review claims in
+    the skill return value.
+    """
+    overview_manifest = _write_manifest(
+        tmp_path / "overview_claims.json",
+        [
+            {
+                "name": "frxusd_supply",
+                "kind": "hard",
+                "display_label": "Foo total supply",
+                "parallel_field": "frxusd_supply",
+                "onchain": {
+                    "fetcher": "total_supply",
+                    "contract": "0xFRX",
+                    "decimals": 18,
+                    "chain": "ethereum",
+                },
+            }
+        ],
+    )
+    team_manifest_path = tmp_path / "team-claims.json"
+    team_manifest_path.write_text(
+        json.dumps(
+            {
+                "claims": [
+                    {
+                        "name": "officer:Jan Kowalski",
+                        "kind": "hard",
+                        "display_label": "Jan Kowalski",
+                        "parallel_field": "officer_jan_kowalski",
+                        "legal_expected": True,
+                    }
+                ]
+            }
+        )
+    )
+
+    # Two-call FakeParallelClient: overview call returns frxusd_supply,
+    # team call returns officer_jan_kowalski. Use a tiny script-style fake.
+    class ScriptedClient:
+        def __init__(self):
+            self.calls: list[dict] = []
+            self.responses = [
+                {
+                    "task_id": "overview-1",
+                    "cost_usd": 1.0,
+                    "output": {
+                        "frxusd_supply": {
+                            "value": "1000000",
+                            "evidence_url": "https://foo.pl/stats",
+                            "evidence_date": "2026-04-09",
+                            "confidence": 0.9,
+                        }
+                    },
+                },
+                {
+                    "task_id": "team-1",
+                    "cost_usd": 0.5,
+                    "output": {
+                        "officer_jan_kowalski": {
+                            "value": "Prezes Zarządu",
+                            "evidence_url": "https://foo.pl/team",
+                            "evidence_date": "2026-04-09",
+                            "confidence": 0.9,
+                        }
+                    },
+                },
+            ]
+
+        def run_task(self, *, processor, schema, prompt):
+            self.calls.append({"processor": processor, "schema": schema, "prompt": prompt})
+            return self.responses.pop(0)
+
+    parallel_client = ScriptedClient()
+
+    def fake_http_get(url, params):
+        if params.get("action") == "tokensupply":
+            return {"status": "1", "result": _ONEM_E18_DEC}
+        raise AssertionError(f"unexpected http_get {params}")
+
+    def legal_adapter():
+        return [
+            Finding(
+                claim="officer:Jan Kowalski",
+                value="Prezes Zarządu",
+                source="krs",
+                source_kind="legal",
+                evidence_url="https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+                evidence_date="2026-04-09",
+            )
+        ]
+
+    result = run_dd_new(
+        config=_combined_pl_config(),
+        overview_claims_path=overview_manifest,
+        cost_preview_usd=1.5,
+        targets_root=tmp_path,
+        env={"PARALLEL_API_KEY": "p", "ETHERSCAN_API_KEY": "e"},
+        parallel_client=parallel_client,
+        http_get=fake_http_get,
+        team_claims_path=team_manifest_path,
+        legal_adapter=legal_adapter,
+    )
+
+    target_dir = tmp_path / "foo-pl"
+    readme = (target_dir / "README.md").read_text()
+    last_run = json.loads((target_dir / "last_run.json").read_text())
+
+    # Both sections in the README
+    assert "# Overview — foo-pl" in readme
+    assert "# Team — foo-pl" in readme
+    assert "Jan Kowalski" in readme
+
+    # Team verdict merged into last_run.json
+    assert last_run["verdicts"]["officer:Jan Kowalski"]["tag"] == "✅"
+    assert last_run["claims"]["officer:Jan Kowalski"]["kind"] == "hard"
+    # Overview verdict still there
+    assert last_run["verdicts"]["frxusd_supply"]["tag"] == "✅"
+
+    # Skill return surfaces team manual-review claim
+    assert "officer:Jan Kowalski" in result.manual_review_claims
+    assert "frxusd_supply" in result.manual_review_claims
+
+    # Two parallel calls (one per section)
+    assert len(parallel_client.calls) == 2
+
+    # Audit log contains both runs
+    audit_lines = (target_dir / "parallel-runs.jsonl").read_text().splitlines()
+    assert len(audit_lines) == 2
+
+
+def test_protocol_target_skips_team_section(tmp_path):
+    """A pure protocol target (no company) must not invoke the Team flow even
+    when team_claims_path is None — the orchestrator just renders Overview."""
+    overview_manifest = _write_manifest(
+        tmp_path / "overview_claims.json",
+        [
+            {
+                "name": "frxusd_supply",
+                "kind": "hard",
+                "display_label": "frxUSD total supply",
+                "parallel_field": "frxusd_supply",
+                "onchain": {
+                    "fetcher": "total_supply",
+                    "contract": "0xFRX",
+                    "decimals": 18,
+                    "chain": "ethereum",
+                },
+            }
+        ],
+    )
+
+    parallel_client = FakeParallelClient(
+        response={
+            "task_id": "task-abc",
+            "cost_usd": 1.0,
+            "output": {
+                "frxusd_supply": {
+                    "value": "1000000",
+                    "evidence_url": "https://frax.com/s",
+                    "evidence_date": "2026-04-09",
+                    "confidence": 0.9,
+                }
+            },
+        }
+    )
+
+    def fake_http_get(url, params):
+        return {"status": "1", "result": _ONEM_E18_DEC}
+
+    result = run_dd_new(
+        config=_frx_config(),  # protocol type
+        overview_claims_path=overview_manifest,
+        cost_preview_usd=1.5,
+        targets_root=tmp_path,
+        env=_env(),
+        parallel_client=parallel_client,
+        http_get=fake_http_get,
+    )
+
+    readme = (tmp_path / "frax-com" / "README.md").read_text()
+    assert "# Overview" in readme
+    assert "# Team" not in readme
+    assert result.verdict_tag in {"✅", "⚠️", "❌"}

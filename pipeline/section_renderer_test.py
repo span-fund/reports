@@ -4,7 +4,7 @@ Takes a section JSON (claims + verdicts + findings) and returns markdown with
 verdict tags and citations from all sources.
 """
 
-from pipeline.section_renderer import render_overview
+from pipeline.section_renderer import render_overview, render_team
 from pipeline.verdict_engine import Finding, Verdict
 
 
@@ -253,3 +253,176 @@ def test_overview_omits_marker_for_auto_passed_soft_claims():
     md = render_overview(section)
 
     assert "[MANUAL REVIEW NEEDED]" not in md
+
+
+def _f(claim: str, value: str, source: str, kind: str, url: str) -> Finding:
+    return Finding(
+        claim=claim,
+        value=value,
+        source=source,
+        source_kind=kind,
+        evidence_url=url,
+        evidence_date="2026-04-09",
+    )
+
+
+def test_team_renders_officers_owners_and_generic_claims():
+    """Team markdown groups findings by claim category. Officer/owner claims
+    (claim names prefixed `officer:` / `owner:`) get their own subsections;
+    everything else lands under a generic 'Team' bucket. Each row carries
+    verdict tag + sources + manual-review marker for hard claims."""
+    section = {
+        "target_name": "Foo Sp. z o.o.",
+        "claims": [
+            {
+                "name": "officer:Jan Kowalski",
+                "display_label": "Jan Kowalski",
+                "kind": "hard",
+                "verdict": Verdict(
+                    tag="✅",
+                    rationale="2 sources agree",
+                    requires_manual_review=True,
+                ),
+                "findings": [
+                    _f(
+                        "officer:Jan Kowalski",
+                        "Prezes Zarządu",
+                        "parallel",
+                        "parallel",
+                        "https://foo.pl/team",
+                    ),
+                    _f(
+                        "officer:Jan Kowalski",
+                        "Prezes Zarządu",
+                        "krs",
+                        "legal",
+                        "https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+                    ),
+                ],
+            },
+            {
+                "name": "owner:Anna Nowak",
+                "display_label": "Anna Nowak",
+                "kind": "hard",
+                "verdict": Verdict(
+                    tag="✅",
+                    rationale="2 sources agree",
+                    requires_manual_review=True,
+                ),
+                "findings": [
+                    _f(
+                        "owner:Anna Nowak",
+                        "50 udziałów",
+                        "parallel",
+                        "parallel",
+                        "https://foo.pl/team",
+                    ),
+                    _f(
+                        "owner:Anna Nowak",
+                        "50 udziałów",
+                        "krs",
+                        "legal",
+                        "https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+                    ),
+                ],
+            },
+            {
+                "name": "team_size",
+                "display_label": "Team size",
+                "kind": "soft",
+                "verdict": Verdict(
+                    tag="✅",
+                    rationale="2 sources agree",
+                    requires_manual_review=False,
+                ),
+                "findings": [
+                    _f("team_size", "12", "parallel", "parallel", "https://foo.pl/team"),
+                    _f("team_size", "12", "linkedin", "browser", "https://linkedin.com/foo"),
+                ],
+            },
+        ],
+    }
+
+    md = render_team(section)
+
+    assert "# Team — Foo Sp. z o.o." in md
+    # Subsection headings
+    assert "## Zarząd" in md
+    assert "## Wspólnicy" in md
+    # Officers + owners rendered with names + values
+    assert "Jan Kowalski" in md
+    assert "Prezes Zarządu" in md
+    assert "Anna Nowak" in md
+    assert "50 udziałów" in md
+    # Generic team claim still rendered
+    assert "Team size" in md
+    assert "12" in md
+    # Hard claims flagged
+    assert md.count("[MANUAL REVIEW NEEDED]") == 2
+    # Soft auto-pass not flagged
+    # (only the two hard claims should carry the marker)
+    # KRS citation reaches the markdown
+    assert "wyszukiwarka-krs.ms.gov.pl" in md
+
+
+def test_team_renders_warning_claims_and_open_questions():
+    """A claim with ⚠️ (e.g. ownership not confirmed by registry) lands in
+    its normal subsection AND surfaces under 'Open questions' so the analyst
+    can't miss the missing registry confirmation."""
+    section = {
+        "target_name": "Bar S.A.",
+        "claims": [
+            {
+                "name": "owner:Mystery Person",
+                "display_label": "Mystery Person",
+                "kind": "hard",
+                "verdict": Verdict(
+                    tag="⚠️",
+                    rationale="no registry confirmation for owner:Mystery Person",
+                    requires_manual_review=True,
+                ),
+                "findings": [
+                    _f(
+                        "owner:Mystery Person",
+                        "30%",
+                        "parallel",
+                        "parallel",
+                        "https://bar.com/about",
+                    ),
+                ],
+            },
+        ],
+    }
+
+    md = render_team(section)
+
+    assert "## Open questions" in md
+    assert "Mystery Person" in md
+    assert "no registry confirmation" in md
+    # Also surfaced under "Pytania do founders" — same data, different framing
+    assert "## Pytania do founders" in md
+
+
+def test_team_renders_failed_claims_only_in_pytania_section():
+    section = {
+        "target_name": "Baz Ltd",
+        "claims": [
+            {
+                "name": "ownership_structure",
+                "display_label": "Ownership structure",
+                "kind": "hard",
+                "verdict": Verdict(
+                    tag="❌",
+                    rationale="legal adapter unreachable",
+                    requires_manual_review=True,
+                ),
+                "findings": [],
+            },
+        ],
+    }
+
+    md = render_team(section)
+
+    assert "## Pytania do founders" in md
+    assert "Ownership structure" in md
+    assert "legal adapter unreachable" in md

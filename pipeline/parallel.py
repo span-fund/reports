@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from pipeline.overview_claims import OverviewClaim
+from pipeline.team_claims import TeamClaim
 from pipeline.verdict_engine import Finding
 
 
@@ -244,6 +245,85 @@ def fetch_overview_claims(
         claims=claims,
     )
 
+    response = client.run_task(processor=tier, schema=schema, prompt=prompt)
+    output = response["output"]
+
+    findings: list[Finding] = []
+    for claim in claims:
+        field = output[claim.parallel_field]
+        findings.append(
+            Finding(
+                claim=claim.name,
+                value=field["value"],
+                source="parallel",
+                source_kind="parallel",
+                evidence_url=field["evidence_url"],
+                evidence_date=field["evidence_date"],
+                confidence=field.get("confidence"),
+            )
+        )
+
+    audit = {
+        "task_id": response["task_id"],
+        "processor": tier,
+        "cost_usd": response["cost_usd"],
+        "cost_source": response.get("cost_source", "estimated"),
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    return findings, audit
+
+
+def build_team_schema(claims: list[TeamClaim]) -> dict[str, Any]:
+    """Mirror of build_overview_schema for the Team manifest. Each team claim
+    becomes a `value/evidence_url/evidence_date/confidence` sub-object.
+    """
+    props = {claim.parallel_field: _claim_field_schema() for claim in claims}
+    return {
+        "type": "object",
+        "properties": props,
+        "required": [claim.parallel_field for claim in claims],
+    }
+
+
+def _build_team_prompt(
+    *,
+    target_name: str,
+    target_domain: str,
+    claims: list[TeamClaim],
+) -> str:
+    header = [
+        f"Research the Team / Ownership section for {target_name} ({target_domain}).",
+        "For every field below, return the best current value plus the primary "
+        "source URL and its publication date.",
+        "Prefer official company sources, regulatory filings and registry "
+        "records over press articles or Crunchbase.",
+        "",
+        "Fields:",
+    ]
+    lines = [f"- {c.parallel_field}: {c.display_label}" for c in claims]
+    return "\n".join(header + lines)
+
+
+def fetch_team_claims(
+    *,
+    target_name: str,
+    target_domain: str,
+    tier: str,
+    claims: list[TeamClaim],
+    client: ParallelClient,
+) -> tuple[list[Finding], dict[str, Any]]:
+    """Single Parallel call covering every Team claim in the manifest.
+
+    Returns one Finding per claim keyed by `claim.name` (officer:..., owner:...
+    or generic) so the orchestrator can cross-check uniformly against legal-
+    registry findings.
+    """
+    schema = build_team_schema(claims)
+    prompt = _build_team_prompt(
+        target_name=target_name,
+        target_domain=target_domain,
+        claims=claims,
+    )
     response = client.run_task(processor=tier, schema=schema, prompt=prompt)
     output = response["output"]
 
