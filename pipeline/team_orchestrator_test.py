@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 
 from pipeline.cache import Cache
+from pipeline.legal_matching import LegalRegistryResult, MaskedPerson
 from pipeline.parallel_test import FakeParallelClient
 from pipeline.team_orchestrator import run_team_section
 from pipeline.verdict_engine import Finding
@@ -70,6 +71,12 @@ def _legal_finding(claim: str, value: str) -> Finding:
     )
 
 
+def _bound_legal_result(*findings: Finding) -> LegalRegistryResult:
+    """Helper for tests that already-bind legal findings (analogous to
+    OpenCorporates with full names). Wraps in a LegalRegistryResult."""
+    return LegalRegistryResult(findings=list(findings), candidates=[])
+
+
 def test_run_team_section_merges_parallel_and_legal_into_green_verdicts(tmp_path):
     manifest = _write_team_manifest(tmp_path / "team-claims.json")
     parallel_client = FakeParallelClient(
@@ -95,12 +102,12 @@ def test_run_team_section_merges_parallel_and_legal_into_green_verdicts(tmp_path
 
     legal_calls: list[dict] = []
 
-    def legal_adapter() -> list[Finding]:
+    def legal_adapter() -> LegalRegistryResult:
         legal_calls.append({})
-        return [
+        return _bound_legal_result(
             _legal_finding("officer:Jan Kowalski", "Prezes Zarządu"),
             _legal_finding("owner:Anna Nowak", "50 udziałów"),
-        ]
+        )
 
     cache = Cache(root=tmp_path / "_cache", ttls={"parallel": 7 * 86400, "legal": 30 * 86400})
     target_dir = tmp_path / "foo-pl"
@@ -166,7 +173,7 @@ def test_run_team_section_warns_when_legal_missing(tmp_path):
         team_claims_path=manifest,
         cache=cache,
         parallel_client=parallel_client,
-        legal_adapter=lambda: [],  # registry returned nothing
+        legal_adapter=lambda: LegalRegistryResult(),  # registry returned nothing
         target_dir=target_dir,
     )
 
@@ -207,12 +214,12 @@ def test_run_team_section_caches_legal_response(tmp_path):
 
     legal_call_count = [0]
 
-    def legal_adapter() -> list[Finding]:
+    def legal_adapter() -> LegalRegistryResult:
         legal_call_count[0] += 1
-        return [
+        return _bound_legal_result(
             _legal_finding("officer:Jan Kowalski", "Prezes"),
             _legal_finding("owner:Anna Nowak", "50%"),
-        ]
+        )
 
     cache = Cache(root=tmp_path / "_cache", ttls={"parallel": 7 * 86400, "legal": 30 * 86400})
     target_dir = tmp_path / "foo-pl"
@@ -236,3 +243,71 @@ def test_run_team_section_caches_legal_response(tmp_path):
     )
 
     assert legal_call_count[0] == 1  # second run hit the cache
+
+
+def test_run_team_section_binds_masked_krs_candidates_to_parallel_names(tmp_path):
+    """KRS public JSON returns PII-masked candidates (no full names).
+    The orchestrator must call match_candidates between parallel fetch
+    and verdict to bind candidates to parallel claims, otherwise the
+    legal source can never satisfy the cross-check for masked registries.
+    This is the Stablewatch / Czarnecki real-world case."""
+    manifest = _write_team_manifest(tmp_path / "team-claims.json")
+
+    parallel_client = FakeParallelClient(
+        response={
+            "task_id": "team-task-masked",
+            "cost_usd": 0.5,
+            "output": {
+                "officer_jan_kowalski": {
+                    "value": "Prezes Zarządu",
+                    "evidence_url": "https://foo.pl/team",
+                    "evidence_date": "2026-04-09",
+                    "confidence": 0.9,
+                },
+                "owner_anna_nowak": {
+                    "value": "50 udziałów",
+                    "evidence_url": "https://foo.pl/team",
+                    "evidence_date": "2026-04-09",
+                    "confidence": 0.9,
+                },
+            },
+        }
+    )
+
+    def legal_adapter() -> LegalRegistryResult:
+        return LegalRegistryResult(
+            findings=[],
+            candidates=[
+                MaskedPerson(
+                    surname_mask="K*******",  # Kowalski (8 chars)
+                    given_names_mask=["J**"],  # Jan (3 chars)
+                    evidence_url="https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+                    evidence_date="2026-04-09",
+                    role="PREZES ZARZĄDU",
+                ),
+                MaskedPerson(
+                    surname_mask="N****",  # Nowak (5 chars)
+                    given_names_mask=["A***"],  # Anna (4 chars)
+                    evidence_url="https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+                    evidence_date="2026-04-09",
+                    shares_text="50 UDZIAŁÓW O ŁĄCZNEJ WARTOŚCI 5 000,00 ZŁ",
+                ),
+            ],
+        )
+
+    cache = Cache(root=tmp_path / "_cache", ttls={"parallel": 7 * 86400, "legal": 30 * 86400})
+    target_dir = tmp_path / "foo-pl"
+    target_dir.mkdir()
+
+    result = run_team_section(
+        config=_config(),
+        team_claims_path=manifest,
+        cache=cache,
+        parallel_client=parallel_client,
+        legal_adapter=legal_adapter,
+        target_dir=target_dir,
+    )
+
+    # Both ownership claims got rebound from masked candidates → ✅
+    assert result.verdicts["officer:Jan Kowalski"]["tag"] == "✅"
+    assert result.verdicts["owner:Anna Nowak"]["tag"] == "✅"

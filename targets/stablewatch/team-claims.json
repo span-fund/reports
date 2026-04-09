@@ -1,0 +1,25 @@
+{
+  "claims": [
+    {
+      "name": "officer:Piotr Saczuk",
+      "kind": "hard",
+      "display_label": "Piotr Saczuk — board / CEO",
+      "parallel_field": "officer_piotr_saczuk",
+      "legal_expected": true
+    },
+    {
+      "name": "owner:Piotr Saczuk",
+      "kind": "hard",
+      "display_label": "Piotr Saczuk — shareholder",
+      "parallel_field": "owner_piotr_saczuk",
+      "legal_expected": true
+    },
+    {
+      "name": "owner:Jacek Czarnecki",
+      "kind": "hard",
+      "display_label": "Jacek Czarnecki — co-founder / shareholder (per public sources)",
+      "parallel_field": "owner_jacek_czarnecki",
+      "legal_expected": true
+    }
+  ]
+}

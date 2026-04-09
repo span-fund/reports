@@ -1,0 +1,10 @@
+{
+  "target_type": "company",
+  "domain": "stablewatch.io",
+  "chain": "ethereum",
+  "jurisdiction": "PL",
+  "tier": "lite",
+  "soft_cap_usd": 5.0,
+  "slug": "stablewatch",
+  "confidence_threshold": 0.7
+}

@@ -35,6 +35,14 @@ def _missing_value(value: str) -> bool:
     return value.strip().lower() in _MISSING_TOKENS
 
 
+def _canonical(value: str) -> str:
+    """Case-folded, whitespace-collapsed canonical form for comparison.
+    Used in the non-numeric string-equality fallback so e.g. KRS uppercase
+    "PREZES ZARZĄDU" and Parallel mixed-case "Prezes Zarządu" don't trigger
+    a spurious cross-check conflict."""
+    return " ".join(value.casefold().split())
+
+
 def _all_numeric(findings: "list[Finding]") -> list[int] | None:
     """Return normalized ints if EVERY finding parses numerically, else None."""
     normalized = [_normalize_numeric(f.value) for f in findings]
@@ -153,13 +161,19 @@ def _strict_tag(claim: str, findings: list[Finding], numeric_tolerance: float) -
             "⚠️",
             f"conflict on {claim}: sources disagree ({sorted(f.value for f in findings)})",
         )
-    # Fallback: string equality for non-numeric claims.
-    values = {f.value for f in findings}
-    if len(values) > 1:
+    # Fallback: case-folded, whitespace-collapsed string equality for
+    # non-numeric claims. KRS returns roles in upper case ("PREZES ZARZĄDU")
+    # while Parallel typically returns mixed case ("Prezes Zarządu") — both
+    # are the same fact and shouldn't trigger a conflict. We compare the
+    # canonical form but report the original strings in the rationale so
+    # the analyst still sees the raw values.
+    canonical = {_canonical(f.value) for f in findings}
+    if len(canonical) > 1:
         return (
             "⚠️",
-            f"conflict on {claim}: sources disagree ({sorted(values)})",
+            f"conflict on {claim}: sources disagree ({sorted(f.value for f in findings)})",
         )
+    values = {f.value for f in findings}
     return (
         "✅",
         f"{len(findings)} sources agree on {claim}={next(iter(values))}",

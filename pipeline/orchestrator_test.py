@@ -15,6 +15,7 @@ audit log.
 import json
 from pathlib import Path
 
+from pipeline.legal_matching import LegalRegistryResult
 from pipeline.orchestrator import run_dd_new
 from pipeline.parallel_test import FakeParallelClient
 from pipeline.verdict_engine import Finding
@@ -491,16 +492,18 @@ def test_combined_target_runs_team_section_after_overview(tmp_path):
         raise AssertionError(f"unexpected http_get {params}")
 
     def legal_adapter():
-        return [
-            Finding(
-                claim="officer:Jan Kowalski",
-                value="Prezes Zarządu",
-                source="krs",
-                source_kind="legal",
-                evidence_url="https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
-                evidence_date="2026-04-09",
-            )
-        ]
+        return LegalRegistryResult(
+            findings=[
+                Finding(
+                    claim="officer:Jan Kowalski",
+                    value="Prezes Zarządu",
+                    source="krs",
+                    source_kind="legal",
+                    evidence_url="https://wyszukiwarka-krs.ms.gov.pl/details?krs=0000123456",
+                    evidence_date="2026-04-09",
+                )
+            ]
+        )
 
     result = run_dd_new(
         config=_combined_pl_config(),

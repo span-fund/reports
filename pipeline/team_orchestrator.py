@@ -17,6 +17,11 @@ from typing import Any
 
 from pipeline.audit_log import append_parallel_run
 from pipeline.cache import Cache
+from pipeline.legal_matching import (
+    LegalRegistryResult,
+    MaskedPerson,
+    match_candidates,
+)
 from pipeline.parallel import ParallelClient, fetch_team_claims
 from pipeline.section_renderer import render_team
 from pipeline.team_claims import TeamClaim, load_team_claims
@@ -39,7 +44,7 @@ def run_team_section(
     team_claims_path: Path,
     cache: Cache,
     parallel_client: ParallelClient,
-    legal_adapter: Callable[[], list[Finding]],
+    legal_adapter: Callable[[], LegalRegistryResult],
     target_dir: Path,
 ) -> TeamSectionResult:
     claims = load_team_claims(team_claims_path)
@@ -51,12 +56,23 @@ def run_team_section(
         client=parallel_client,
         target_dir=target_dir,
     )
-    legal_findings = _fetch_legal_findings_cached(
+    legal_result = _fetch_legal_findings_cached(
         cache=cache,
         config=config,
         claims=claims,
         legal_adapter=legal_adapter,
     )
+
+    # Bind PII-masked candidates (e.g. from KRS public JSON) to parallel
+    # claims via initial+length matching, then merge with already-bound
+    # legal findings (e.g. from OpenCorporates with full names). Both
+    # paths produce source_kind="legal" findings the verdict-engine
+    # consumes uniformly.
+    bound_from_candidates = match_candidates(
+        parallel_findings=parallel_findings,
+        candidates=legal_result.candidates,
+    )
+    legal_findings = list(legal_result.findings) + bound_from_candidates
 
     parallel_by_claim: dict[str, Finding] = {f.claim: f for f in parallel_findings}
     legal_by_claim: dict[str, list[Finding]] = {}
@@ -159,23 +175,51 @@ def _fetch_legal_findings_cached(
     cache: Cache,
     config: TargetConfig,
     claims: list[TeamClaim],
-    legal_adapter: Callable[[], list[Finding]],
-) -> list[Finding]:
+    legal_adapter: Callable[[], LegalRegistryResult],
+) -> LegalRegistryResult:
     # Skip the registry call entirely if no claim asked for legal confirmation.
     if not any(c.legal_expected for c in claims):
-        return []
+        return LegalRegistryResult()
     key = _legal_cache_key(config)
     cached = cache.get(config.slug, "legal", key)
     if cached is not None:
-        return [_finding_from_dict(d) for d in cached]
-    findings = legal_adapter()
+        return LegalRegistryResult(
+            findings=[_finding_from_dict(d) for d in cached["findings"]],
+            candidates=[_masked_person_from_dict(d) for d in cached["candidates"]],
+        )
+    result = legal_adapter()
     cache.set(
         config.slug,
         "legal",
         key,
-        [_finding_to_dict(f) for f in findings],
+        {
+            "findings": [_finding_to_dict(f) for f in result.findings],
+            "candidates": [_masked_person_to_dict(c) for c in result.candidates],
+        },
     )
-    return findings
+    return result
+
+
+def _masked_person_to_dict(p: MaskedPerson) -> dict[str, Any]:
+    return {
+        "surname_mask": p.surname_mask,
+        "given_names_mask": list(p.given_names_mask),
+        "evidence_url": p.evidence_url,
+        "evidence_date": p.evidence_date,
+        "role": p.role,
+        "shares_text": p.shares_text,
+    }
+
+
+def _masked_person_from_dict(d: dict[str, Any]) -> MaskedPerson:
+    return MaskedPerson(
+        surname_mask=d["surname_mask"],
+        given_names_mask=list(d["given_names_mask"]),
+        evidence_url=d["evidence_url"],
+        evidence_date=d["evidence_date"],
+        role=d.get("role"),
+        shares_text=d.get("shares_text"),
+    )
 
 
 def _finding_to_dict(f: Finding) -> dict[str, Any]:

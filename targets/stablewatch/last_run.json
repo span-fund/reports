@@ -1,0 +1,90 @@
+{
+  "config": {
+    "target_type": "company",
+    "domain": "stablewatch.io",
+    "chain": "ethereum",
+    "jurisdiction": "PL",
+    "tier": "lite",
+    "soft_cap_usd": 5.0,
+    "slug": "stablewatch",
+    "confidence_threshold": 0.7
+  },
+  "findings": [
+    {
+      "claim": "officer:Piotr Saczuk",
+      "value": "CEO",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://www.linkedin.com/posts/piotr-saczuk-0347521bb_come-to-cannes-habibi-activity-7435671602811543552-FdlX",
+      "evidence_date": "2025-08-20",
+      "confidence": 0.95
+    },
+    {
+      "claim": "officer:Piotr Saczuk",
+      "value": "PREZES ZARZ\u0104DU",
+      "source": "krs",
+      "source_kind": "legal",
+      "evidence_url": "https://wyszukiwarka-krs.ms.gov.pl/details?krs=0001174918",
+      "evidence_date": "2026-04-09",
+      "confidence": null
+    },
+    {
+      "claim": "owner:Piotr Saczuk",
+      "value": "co-founder, CEO",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://www.youtube.com/watch?v=OqIvWenZBdU",
+      "evidence_date": "2025-08-20",
+      "confidence": 0.9
+    },
+    {
+      "claim": "owner:Piotr Saczuk",
+      "value": "380 UDZIA\u0141\u00d3W O \u0141\u0104CZNEJ WARTO\u015aCI 19 000,00 Z\u0141",
+      "source": "krs",
+      "source_kind": "legal",
+      "evidence_url": "https://wyszukiwarka-krs.ms.gov.pl/details?krs=0001174918",
+      "evidence_date": "2026-04-09",
+      "confidence": null
+    },
+    {
+      "claim": "owner:Jacek Czarnecki",
+      "value": "co-founder",
+      "source": "parallel",
+      "source_kind": "parallel",
+      "evidence_url": "https://x.com/Jacek_Czarnecki",
+      "evidence_date": "2025-05-20",
+      "confidence": 0.95
+    }
+  ],
+  "verdicts": {
+    "officer:Piotr Saczuk": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "conflict on officer:Piotr Saczuk: sources disagree (['CEO', 'PREZES ZARZ\u0104DU'])"
+    },
+    "owner:Piotr Saczuk": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "conflict on owner:Piotr Saczuk: sources disagree (['380 UDZIA\u0141\u00d3W O \u0141\u0104CZNEJ WARTO\u015aCI 19 000,00 Z\u0141', 'co-founder, CEO'])"
+    },
+    "owner:Jacek Czarnecki": {
+      "tag": "\u26a0\ufe0f",
+      "rationale": "no registry confirmation for owner:Jacek Czarnecki: legal verifier required but no source_kind=legal finding present"
+    }
+  },
+  "claims": {
+    "officer:Piotr Saczuk": {
+      "kind": "hard",
+      "requires_manual_review": true,
+      "legal_expected": true
+    },
+    "owner:Piotr Saczuk": {
+      "kind": "hard",
+      "requires_manual_review": true,
+      "legal_expected": true
+    },
+    "owner:Jacek Czarnecki": {
+      "kind": "hard",
+      "requires_manual_review": true,
+      "legal_expected": true
+    }
+  }
+}

@@ -21,6 +21,7 @@ from pipeline.cache import Cache
 from pipeline.cost_guard import check_cost
 from pipeline.env_check import require_env_vars
 from pipeline.etherscan import fetch_contract_read, fetch_token_balance, fetch_total_supply
+from pipeline.legal_matching import LegalRegistryResult
 from pipeline.overview_claims import OnchainSpec, OverviewClaim, load_overview_claims
 from pipeline.parallel import ParallelClient, fetch_overview_claims
 from pipeline.section_renderer import render_overview
@@ -58,7 +59,7 @@ def run_dd_new(
     cache_root: Path | None = None,
     chain_id: int = 1,
     team_claims_path: Path | None = None,
-    legal_adapter: Callable[[], list[Finding]] | None = None,
+    legal_adapter: Callable[[], LegalRegistryResult] | None = None,
 ) -> DDRunResult:
     # 1. Fail-fast on missing env vars
     require_env_vars(env, REQUIRED_ENV)
@@ -170,7 +171,7 @@ def run_dd_new(
             team_claims_path=team_claims_path,
             cache=cache,
             parallel_client=parallel_client,
-            legal_adapter=legal_adapter or (lambda: []),
+            legal_adapter=legal_adapter or (lambda: LegalRegistryResult()),
             target_dir=target_dir,
         )
         readme = overview_md + "\n\n" + team_result.markdown
