@@ -4,7 +4,7 @@ Takes a section JSON (claims + verdicts + findings) and returns markdown with
 verdict tags and citations from all sources.
 """
 
-from pipeline.section_renderer import render_overview, render_team
+from pipeline.section_renderer import render_overview, render_section, render_team
 from pipeline.verdict_engine import Finding, Verdict
 
 
@@ -426,3 +426,187 @@ def test_team_renders_failed_claims_only_in_pytania_section():
     assert "## Pytania do founders" in md
     assert "Ownership structure" in md
     assert "legal adapter unreachable" in md
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: generic section renderer
+# ---------------------------------------------------------------------------
+
+
+def test_render_section_metric_table():
+    """Default render style: metric table like Overview — used for
+    Collateral, Revenue, Key Contracts."""
+    section = {
+        "section_name": "Collateral",
+        "target_name": "sky-protocol",
+        "render_style": "metric_table",
+        "claims": [
+            {
+                "name": "collateral_composition",
+                "display_label": "Collateral breakdown",
+                "verdict": Verdict(
+                    tag="✅", rationale="2 sources agree", requires_manual_review=True
+                ),
+                "findings": [
+                    Finding(
+                        claim="collateral_composition",
+                        value="60% USDC, 30% ETH",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://example.com/c",
+                        evidence_date="2026-04-10",
+                    ),
+                ],
+            },
+        ],
+    }
+
+    md = render_section(section)
+
+    assert "# Collateral — sky-protocol" in md
+    assert "| Metric | Value | Source |" in md
+    assert "Collateral breakdown" in md
+    assert "60% USDC, 30% ETH" in md
+
+
+def test_render_section_risk_table():
+    """Risks section renders with severity column."""
+    section = {
+        "section_name": "Risks",
+        "target_name": "sky-protocol",
+        "render_style": "risk_table",
+        "claims": [
+            {
+                "name": "governance_centralization",
+                "display_label": "Governance centralization",
+                "severity": "High",
+                "verdict": Verdict(tag="✅", rationale="confirmed", requires_manual_review=True),
+                "findings": [
+                    Finding(
+                        claim="governance_centralization",
+                        value="S&P B-, ECB paper",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://example.com",
+                        evidence_date="2026-04-10",
+                    ),
+                ],
+            },
+            {
+                "name": "yield_sustainability",
+                "display_label": "Yield sustainability",
+                "severity": "Medium",
+                "verdict": Verdict(tag="⚠️", rationale="uncertain", requires_manual_review=True),
+                "findings": [
+                    Finding(
+                        claim="yield_sustainability",
+                        value="Proven unsustainable at higher levels",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://example.com/y",
+                        evidence_date="2026-04-10",
+                    ),
+                ],
+            },
+        ],
+    }
+
+    md = render_section(section)
+
+    assert "# Risks — sky-protocol" in md
+    assert "| Risk | Severity | Evidence |" in md
+    assert "Governance centralization" in md
+    assert "High" in md
+    assert "Medium" in md
+
+
+def test_render_section_incident_table():
+    """Historical Incidents renders with date and impact columns."""
+    section = {
+        "section_name": "Historical Incidents",
+        "target_name": "sky-protocol",
+        "render_style": "incident_table",
+        "claims": [
+            {
+                "name": "black_thursday",
+                "display_label": "Black Thursday",
+                "verdict": Verdict(tag="✅", rationale="confirmed", requires_manual_review=True),
+                "findings": [
+                    Finding(
+                        claim="black_thursday",
+                        value="ETH -43%, $8.32M exploited",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://example.com/bt",
+                        evidence_date="2020-03-12",
+                    ),
+                ],
+            },
+        ],
+    }
+
+    md = render_section(section)
+
+    assert "# Historical Incidents — sky-protocol" in md
+    assert "| Incident | Date | Impact | Source |" in md
+    assert "Black Thursday" in md
+    assert "ETH -43%" in md
+
+
+def test_render_section_narrative():
+    """Mechanism and Regulatory use narrative style — prose, not table."""
+    section = {
+        "section_name": "Mechanism",
+        "target_name": "ethena",
+        "render_style": "narrative",
+        "claims": [
+            {
+                "name": "mechanism_description",
+                "display_label": "How the protocol works",
+                "verdict": Verdict(tag="✅", rationale="confirmed", requires_manual_review=False),
+                "findings": [
+                    Finding(
+                        claim="mechanism_description",
+                        value="Delta-neutral position: short ETH perp + long staked ETH",
+                        source="parallel",
+                        source_kind="parallel",
+                        evidence_url="https://ethena.fi/docs",
+                        evidence_date="2026-04-10",
+                    ),
+                ],
+            },
+        ],
+    }
+
+    md = render_section(section)
+
+    assert "# Mechanism — ethena" in md
+    # Narrative style: no table, claim rendered as bullet or paragraph
+    assert "How the protocol works" in md
+    assert "Delta-neutral position" in md
+    assert "| Metric |" not in md
+
+
+def test_render_section_failed_claims_go_to_pytania():
+    """Failed claims in any generic section land in Pytania do founders."""
+    section = {
+        "section_name": "Revenue",
+        "target_name": "test",
+        "render_style": "metric_table",
+        "claims": [
+            {
+                "name": "annual_revenue",
+                "display_label": "Annual revenue",
+                "verdict": Verdict(
+                    tag="❌", rationale="no data found", requires_manual_review=True
+                ),
+                "findings": [],
+            },
+        ],
+    }
+
+    md = render_section(section)
+
+    assert "## Pytania do founders" in md
+    assert "Annual revenue" in md
+    assert "no data found" in md

@@ -11,9 +11,12 @@ from pathlib import Path
 from pipeline.overview_claims import OnchainSpec, OverviewClaim
 from pipeline.parallel import (
     _build_overview_prompt,
+    build_section_schema,
     fetch_overview_claims,
     fetch_overview_total_supply,
+    fetch_section_claims,
 )
+from pipeline.section_claims import SectionClaim
 
 
 class FakeParallelClient:
@@ -450,3 +453,91 @@ def test_build_prompt_truncates_trailing_hints_when_over_budget():
     assert "metric_19" in prompt
     # ...but the last claim's hint specifically is gone.
     assert "0x" + "0" * 38 + "13" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: generic section schema & fetch
+# ---------------------------------------------------------------------------
+
+
+def test_build_section_schema_produces_nested_claim_objects():
+    claims = [
+        SectionClaim(
+            name="annual_revenue",
+            kind="hard",
+            display_label="Annualized revenue",
+            parallel_field="annual_revenue",
+        ),
+        SectionClaim(
+            name="revenue_commentary",
+            kind="soft",
+            display_label="Revenue commentary",
+            parallel_field="revenue_commentary",
+        ),
+    ]
+    schema = build_section_schema(claims)
+
+    assert schema["type"] == "object"
+    assert set(schema["properties"].keys()) == {"annual_revenue", "revenue_commentary"}
+    assert set(schema["required"]) == {"annual_revenue", "revenue_commentary"}
+    # Each field is the standard value/evidence/confidence sub-object
+    prop = schema["properties"]["annual_revenue"]
+    assert prop["type"] == "object"
+    assert "value" in prop["properties"]
+    assert "evidence_url" in prop["properties"]
+    assert "confidence" in prop["properties"]
+
+
+def test_fetch_section_claims_returns_findings_keyed_by_name():
+    claims = [
+        SectionClaim(
+            name="collateral_composition",
+            kind="hard",
+            display_label="Collateral breakdown",
+            parallel_field="collateral_composition",
+        ),
+        SectionClaim(
+            name="collateralization_ratio",
+            kind="hard",
+            display_label="Coll. ratio",
+            parallel_field="collateralization_ratio",
+        ),
+    ]
+    client = FakeParallelClient(
+        response={
+            "task_id": "task-sec-1",
+            "cost_usd": 0.50,
+            "output": {
+                "collateral_composition": {
+                    "value": "60% USDC, 30% ETH, 10% RWA",
+                    "evidence_url": "https://example.com/collateral",
+                    "evidence_date": "2026-04-10",
+                    "confidence": 0.88,
+                },
+                "collateralization_ratio": {
+                    "value": "119.58%",
+                    "evidence_url": "https://example.com/ratio",
+                    "evidence_date": "2026-04-10",
+                    "confidence": 0.95,
+                },
+            },
+        }
+    )
+
+    findings, audit = fetch_section_claims(
+        section_name="Collateral",
+        target_name="sky-protocol",
+        target_domain="sky.money",
+        tier="base",
+        claims=claims,
+        client=client,
+    )
+
+    assert len(findings) == 2
+    by_name = {f.claim: f for f in findings}
+    assert by_name["collateral_composition"].value == "60% USDC, 30% ETH, 10% RWA"
+    assert by_name["collateral_composition"].source_kind == "parallel"
+    assert by_name["collateralization_ratio"].confidence == 0.95
+    assert audit["task_id"] == "task-sec-1"
+    # Prompt must mention the section name
+    assert "Collateral" in client.calls[0]["prompt"]

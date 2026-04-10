@@ -597,3 +597,149 @@ def test_protocol_target_skips_team_section(tmp_path):
     assert "# Overview" in readme
     assert "# Team" not in readme
     assert result.verdict_tag in {"✅", "⚠️", "❌"}
+
+
+def test_full_report_includes_generic_sections(tmp_path):
+    """Phase 5: orchestrator accepts section_manifests for generic sections
+    (Mechanism, Revenue, etc.) and appends their rendered markdown to the
+    README after Overview + Team."""
+    overview_manifest = _write_manifest(
+        tmp_path / "overview_claims.json",
+        [
+            {
+                "name": "frxusd_supply",
+                "kind": "hard",
+                "display_label": "frxUSD total supply",
+                "parallel_field": "frxusd_supply",
+                "onchain": {
+                    "fetcher": "total_supply",
+                    "contract": "0xFRX",
+                    "decimals": 18,
+                    "chain": "ethereum",
+                },
+            }
+        ],
+    )
+
+    # Generic section manifests
+    mechanism_manifest = tmp_path / "mechanism_claims.json"
+    mechanism_manifest.write_text(
+        json.dumps(
+            {
+                "section": "Mechanism",
+                "claims": [
+                    {
+                        "name": "mechanism_description",
+                        "kind": "soft",
+                        "display_label": "How the protocol works",
+                        "parallel_field": "mechanism_description",
+                    },
+                ],
+            }
+        )
+    )
+    risks_manifest = tmp_path / "risks_claims.json"
+    risks_manifest.write_text(
+        json.dumps(
+            {
+                "section": "Risks",
+                "claims": [
+                    {
+                        "name": "governance_centralization",
+                        "kind": "hard",
+                        "display_label": "Governance centralization",
+                        "parallel_field": "governance_centralization",
+                        "severity": "High",
+                    },
+                ],
+            }
+        )
+    )
+
+    call_count = 0
+
+    class MultiClient:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def run_task(self, *, processor, schema, prompt):
+            self.calls.append({"processor": processor, "prompt": prompt})
+            nonlocal call_count
+            call_count += 1
+            # Return different outputs based on section detected in prompt
+            if "Overview" in prompt or "frxusd_supply" in prompt:
+                return {
+                    "task_id": f"t-{call_count}",
+                    "cost_usd": 0.5,
+                    "output": {
+                        "frxusd_supply": {
+                            "value": "1000000",
+                            "evidence_url": "https://frax.com/s",
+                            "evidence_date": "2026-04-10",
+                            "confidence": 0.9,
+                        },
+                    },
+                }
+            if "Mechanism" in prompt:
+                return {
+                    "task_id": f"t-{call_count}",
+                    "cost_usd": 0.3,
+                    "output": {
+                        "mechanism_description": {
+                            "value": "Delta-neutral position: short ETH perp + long staked ETH",
+                            "evidence_url": "https://ethena.fi/docs",
+                            "evidence_date": "2026-04-10",
+                            "confidence": 0.95,
+                        },
+                    },
+                }
+            if "Risks" in prompt:
+                return {
+                    "task_id": f"t-{call_count}",
+                    "cost_usd": 0.3,
+                    "output": {
+                        "governance_centralization": {
+                            "value": "S&P B-, ECB paper confirms whale dominance",
+                            "evidence_url": "https://spglobal.com/sky",
+                            "evidence_date": "2026-04-10",
+                            "confidence": 0.92,
+                        },
+                    },
+                }
+            raise AssertionError(f"unexpected prompt: {prompt[:80]}")
+
+    client = MultiClient()
+
+    def fake_http_get(url, params):
+        return {"status": "1", "result": _ONEM_E18_DEC}
+
+    run_dd_new(
+        config=_frx_config(),
+        overview_claims_path=overview_manifest,
+        cost_preview_usd=1.5,
+        targets_root=tmp_path,
+        env=_env(),
+        parallel_client=client,
+        http_get=fake_http_get,
+        section_manifests=[mechanism_manifest, risks_manifest],
+    )
+
+    target_dir = tmp_path / "frax-com"
+    readme = (target_dir / "README.md").read_text()
+
+    # All sections present in README
+    assert "# Overview" in readme
+    assert "# Mechanism" in readme
+    assert "# Risks" in readme
+    # STRICT with 1 source → ❌ → claims in Pytania (rationale visible)
+    assert "How the protocol works" in readme
+    assert "Governance centralization" in readme
+
+    # last_run.json contains all verdicts
+    last_run = json.loads((target_dir / "last_run.json").read_text())
+    assert "frxusd_supply" in last_run["verdicts"]
+    assert "mechanism_description" in last_run["verdicts"]
+    assert "governance_centralization" in last_run["verdicts"]
+
+    # 3 Parallel calls: Overview + Mechanism + Risks
+    assert len(client.calls) == 3

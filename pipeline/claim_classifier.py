@@ -21,6 +21,33 @@ _RULES: dict[str, dict[str, str]] = {
         "team_credentials": "hard",
         "cap_table_changes": "hard",
     },
+    "Mechanism": {
+        "contract_risk": "hard",
+    },
+    "Collateral": {
+        "collateral_composition": "hard",
+        "collateralization_ratio": "hard",
+    },
+    "Revenue": {
+        "annual_revenue": "hard",
+    },
+    "Governance": {
+        "governance_centralization": "hard",
+        "voter_turnout": "hard",
+    },
+    "Regulatory": {
+        "compliance_status": "hard",
+        "jurisdiction_status": "hard",
+    },
+    "Historical Incidents": {
+        "incident": "hard",
+    },
+    "Risks": {
+        "risk_severity": "hard",
+    },
+    "Key Contracts": {
+        "contract_address": "hard",
+    },
 }
 
 

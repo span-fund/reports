@@ -129,6 +129,153 @@ def _render_team_bullet(claim: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def render_section(section: dict[str, Any]) -> str:
+    """Generic section renderer supporting 4 render styles:
+    metric_table, risk_table, incident_table, narrative.
+    """
+    style = section.get("render_style", "metric_table")
+    dispatch = {
+        "metric_table": _render_section_metric_table,
+        "risk_table": _render_section_risk_table,
+        "incident_table": _render_section_incident_table,
+        "narrative": _render_section_narrative,
+    }
+    return dispatch[style](section)
+
+
+def _render_section_metric_table(section: dict[str, Any]) -> str:
+    section_name = section["section_name"]
+    target = section["target_name"]
+    passed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for claim in section["claims"]:
+        if claim["verdict"].tag == "❌":
+            failed.append(claim)
+        else:
+            passed.append(claim)
+
+    lines: list[str] = [f"# {section_name} — {target}", ""]
+    if passed:
+        lines.append("| Metric | Value | Source |")
+        lines.append("|---|---|---|")
+        for claim in passed:
+            lines.append(_render_metric_row(claim))
+        lines.append("")
+    if failed:
+        lines.append("## Pytania do founders")
+        lines.append("")
+        for claim in failed:
+            label = claim.get("display_label") or claim["name"]
+            lines.append(f"- **{label}** {claim['verdict'].tag} — {claim['verdict'].rationale}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_section_risk_table(section: dict[str, Any]) -> str:
+    section_name = section["section_name"]
+    target = section["target_name"]
+    passed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for claim in section["claims"]:
+        if claim["verdict"].tag == "❌":
+            failed.append(claim)
+        else:
+            passed.append(claim)
+
+    lines: list[str] = [f"# {section_name} — {target}", ""]
+    if passed:
+        lines.append("| Risk | Severity | Evidence |")
+        lines.append("|---|---|---|")
+        for claim in passed:
+            label = claim.get("display_label") or claim["name"]
+            severity = claim.get("severity", "")
+            verdict = claim["verdict"]
+            marker = " [MANUAL REVIEW NEEDED]" if verdict.requires_manual_review else ""
+            evidence = claim["findings"][0].value if claim.get("findings") else ""
+            lines.append(f"| {label} {verdict.tag}{marker} | {severity} | {evidence} |")
+        lines.append("")
+    if failed:
+        lines.append("## Pytania do founders")
+        lines.append("")
+        for claim in failed:
+            label = claim.get("display_label") or claim["name"]
+            lines.append(f"- **{label}** {claim['verdict'].tag} — {claim['verdict'].rationale}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_section_incident_table(section: dict[str, Any]) -> str:
+    section_name = section["section_name"]
+    target = section["target_name"]
+    passed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for claim in section["claims"]:
+        if claim["verdict"].tag == "❌":
+            failed.append(claim)
+        else:
+            passed.append(claim)
+
+    lines: list[str] = [f"# {section_name} — {target}", ""]
+    if passed:
+        lines.append("| Incident | Date | Impact | Source |")
+        lines.append("|---|---|---|---|")
+        for claim in passed:
+            label = claim.get("display_label") or claim["name"]
+            verdict = claim["verdict"]
+            marker = " [MANUAL REVIEW NEEDED]" if verdict.requires_manual_review else ""
+            findings = claim.get("findings") or []
+            value = findings[0].value if findings else ""
+            date = findings[0].evidence_date if findings else ""
+            sources = ", ".join(f"[{f.source}]({f.evidence_url})" for f in findings)
+            lines.append(f"| {label} {verdict.tag}{marker} | {date} | {value} | {sources} |")
+        lines.append("")
+    if failed:
+        lines.append("## Pytania do founders")
+        lines.append("")
+        for claim in failed:
+            label = claim.get("display_label") or claim["name"]
+            lines.append(f"- **{label}** {claim['verdict'].tag} — {claim['verdict'].rationale}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _render_section_narrative(section: dict[str, Any]) -> str:
+    section_name = section["section_name"]
+    target = section["target_name"]
+    passed: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for claim in section["claims"]:
+        if claim["verdict"].tag == "❌":
+            failed.append(claim)
+        else:
+            passed.append(claim)
+
+    lines: list[str] = [f"# {section_name} — {target}", ""]
+    for claim in passed:
+        label = claim.get("display_label") or claim["name"]
+        verdict = claim["verdict"]
+        marker = " [MANUAL REVIEW NEEDED]" if verdict.requires_manual_review else ""
+        findings = claim.get("findings") or []
+        value = findings[0].value if findings else ""
+        sources = ", ".join(f"[{f.source}]({f.evidence_url}) {f.evidence_date}" for f in findings)
+        lines.append(f"### {label} {verdict.tag}{marker}")
+        lines.append("")
+        if value:
+            lines.append(value)
+            lines.append("")
+        if sources:
+            lines.append(f"*Sources: {sources}*")
+            lines.append("")
+    if failed:
+        lines.append("## Pytania do founders")
+        lines.append("")
+        for claim in failed:
+            label = claim.get("display_label") or claim["name"]
+            lines.append(f"- **{label}** {claim['verdict'].tag} — {claim['verdict'].rationale}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _render_metric_row(claim: dict[str, Any]) -> str:
     label = claim.get("display_label") or claim["name"]
     verdict = claim["verdict"]
